@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<style>
+  body { margin: 0; padding: 0 16px 24px; font: 13px/1.6 var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-sideBar-background, var(--vscode-editor-background)); }
+  /* 썸네일 확대 효과가 새 층을 만들어도 머리가 늘 위에 오게 한다 */
+  header { position: sticky; top: 0; z-index: 5; padding: 12px 0 0; background: var(--vscode-sideBar-background, var(--vscode-editor-background)); }
+  .title { font-weight: 600; font-size: 14px; margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  nav { position: relative; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--vscode-panel-border); }
+  /* 탭 고르기 버튼과 메뉴 */
+  #colbtn { all: unset; flex: none; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin-bottom: 4px; box-sizing: border-box; border: 1px solid var(--vscode-panel-border); border-radius: 6px; color: var(--vscode-descriptionForeground); cursor: pointer; transition: color .15s, background .15s; }
+  #colbtn:hover, #colbtn.on { color: var(--vscode-foreground); background: var(--vscode-list-hoverBackground); }
+  #colbtn:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+  #tabmenu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 6; min-width: 200px; padding: 8px 0 4px; background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border)); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .3); opacity: 0; transform: translateY(-6px); pointer-events: none; transition: opacity .18s ease, transform .22s cubic-bezier(.2, .8, .2, 1); }
+  #tabmenu.on { opacity: 1; transform: none; pointer-events: auto; }
+  .mh { padding: 2px 14px 6px; font-size: 12px; font-weight: 500; color: var(--vscode-descriptionForeground); }
+  .mrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .mrow .sw { font-weight: 400; }
+  .mnote { margin-top: 4px; font-weight: 400; color: var(--vscode-charts-blue); }
+  #tabmenu { min-width: 240px; }
+  #tablist { margin: 0; padding: 0; }
+  #tablist li { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border: 0; background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); }
+  #tablist li:hover { background: var(--vscode-list-hoverBackground); }
+  #tablist li.dragging { position: relative; z-index: 1; box-shadow: 0 2px 8px rgba(0, 0, 0, .25); }
+  #tablist label { flex: 1; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  #tablist input { width: 16px; height: 16px; margin: 0; accent-color: var(--vscode-button-background); cursor: pointer; }
+  #tablist input:disabled { cursor: default; opacity: .5; }
+  .grip { flex: none; display: flex; color: var(--vscode-descriptionForeground); cursor: grab; touch-action: none; }
+  .mf { margin-top: 4px; padding: 8px 14px 4px; border-top: 1px solid var(--vscode-panel-border); }
+  .mf button { all: unset; font-size: 12px; color: var(--vscode-descriptionForeground); cursor: pointer; }
+  .mf button:hover { color: var(--vscode-foreground); }
+  @media (prefers-reduced-motion: reduce) { #tabmenu, #colbtn { transition: none; } }
+  /* 탭이 폭을 넘으면 가로로 밀어 본다. 막대는 숨긴다 */
+  #tabs { flex: 1; min-width: 0; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+  #tabs::-webkit-scrollbar { display: none; }
+  #tabs button { touch-action: none; user-select: none; }
+  #tabs button.dragging { position: relative; z-index: 1; cursor: grabbing; color: var(--vscode-foreground); background: var(--vscode-list-hoverBackground); border-radius: 4px; box-shadow: 0 2px 8px rgba(0, 0, 0, .25); }
+  @media (prefers-reduced-motion: reduce) { #tabs button { transition: none !important; } }
+  nav button { flex: none; }
+  nav button { all: unset; cursor: pointer; padding: 6px 10px 8px; font-weight: 500; color: var(--vscode-descriptionForeground); transition: color .2s; }
+  nav button.on { color: var(--vscode-foreground); }
+  /* 탭 밑줄은 하나만 두고 고른 탭 아래로 미끄러뜨린다 */
+  #ind { position: absolute; left: 0; bottom: -1px; height: 2px; width: 0; border-radius: 1px; background: var(--vscode-focusBorder); transition: transform .25s cubic-bezier(.2, .8, .2, 1), width .25s cubic-bezier(.2, .8, .2, 1), opacity .15s; }
+  @media (prefers-reduced-motion: reduce) { #ind, nav button { transition: none; } }
+  nav .n { margin-left: 6px; display: inline-block; padding: 2px 7px; line-height: 14px; border-radius: 10px; font-size: 11px; vertical-align: 1px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+  main { padding-top: 16px; }
+  .muted { color: var(--vscode-descriptionForeground); }
+  .bar { height: 6px; border-radius: 3px; background: var(--vscode-editorWidget-border, #8884); overflow: hidden; margin: 8px 0 4px; }
+  .bar i { display: block; height: 100%; background: var(--vscode-progressBar-background); }
+  .bar.warn i { background: var(--vscode-editorWarning-foreground); }
+  h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  ul { list-style: none; padding: 0; margin: 12px 0 0; }
+  li { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--vscode-panel-border); }
+  li:last-child { border-bottom: 0; }
+  .ic { flex: none; width: 16px; text-align: center; }
+  .done .t { color: var(--vscode-descriptionForeground); }
+  .memo { display: block; font-size: 12px; color: var(--vscode-descriptionForeground); }
+  .big { font-size: 22px; font-weight: 600; }
+  .row { display: flex; justify-content: space-between; gap: 8px; }
+  .badge { flex: none; display: inline-block; font-size: 11px; padding: 2px 8px; line-height: 14px; border-radius: 10px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+  .badge.running { background: var(--vscode-progressBar-background); color: var(--vscode-button-foreground); }
+  .badge.failed { background: var(--vscode-inputValidation-errorBackground); color: var(--vscode-foreground); }
+  a { color: var(--vscode-textLink-foreground); cursor: pointer; text-decoration: none; word-break: break-all; }
+  a:hover { text-decoration: underline; }
+  .grow { flex: 1; min-width: 0; }
+  h3 { font-size: 12px; font-weight: 600; margin: 20px 0 0; color: var(--vscode-descriptionForeground); }
+  .grow .bar, .mini { display: block; margin: 4px 0 2px; }
+  .mini { height: 3px; border-radius: 2px; background: var(--vscode-editorWidget-border, #8884); overflow: hidden; }
+  .mini i { display: block; height: 100%; background: var(--vscode-progressBar-background); }
+  .done .mini i { background: var(--vscode-descriptionForeground); }
+  .num { flex: none; min-width: 64px; text-align: right; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .bar.stack { display: flex; height: 10px; border-radius: 4px; }
+  .bar.stack i { flex: none; }
+  .bar.stack i + i { margin-left: 1px; }
+  .bar.stack .buf { margin-left: auto; background: repeating-linear-gradient(135deg, var(--vscode-descriptionForeground) 0 2px, transparent 2px 4px); opacity: .5; }
+  li.cx { display: block; }
+  /* 펼침 공용: 높이는 grid 0fr→1fr 로 미끄러지고, 함께 페이드 */
+  .exp-head { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+  .exp-body { display: grid; grid-template-rows: 0fr; opacity: 0; transform: translateY(-6px); transition: grid-template-rows .28s cubic-bezier(.2, .8, .2, 1), opacity .2s ease, transform .28s cubic-bezier(.2, .8, .2, 1); }
+  .exp-body > div { overflow: hidden; min-height: 0; }
+  .exp.open > .exp-body { grid-template-rows: 1fr; opacity: 1; transform: none; }
+  .chev { flex: none; width: 16px; text-align: center; color: var(--vscode-descriptionForeground); transition: transform .28s cubic-bezier(.2, .8, .2, 1); }
+  .exp.open .chev { transform: rotate(90deg); }
+  /* 결과보고 */
+  .rep { padding: 10px 0; border-bottom: 1px solid var(--vscode-panel-border); }
+  .rep .md { margin-top: 8px; }
+  .peek { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; max-height: 3.2em; font-size: 12px; color: var(--vscode-descriptionForeground); transition: opacity .2s ease, max-height .28s cubic-bezier(.2, .8, .2, 1); }
+  .exp.open .peek { opacity: 0; max-height: 0; }
+  .unread { flex: none; width: 7px; height: 7px; margin-top: 8px; border-radius: 50%; background: var(--vscode-charts-blue); }
+  .readpad { flex: none; width: 7px; }
+  .badge.by { margin-right: 6px; }
+  .reptop { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+  @media (prefers-reduced-motion: reduce) { .exp-body, .chev, .peek { transition: none; } }
+  .one { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cxbody { padding: 4px 0 8px 24px; }
+  .turn { margin-top: 10px; }
+  .turn .who { font-size: 11px; color: var(--vscode-descriptionForeground); }
+  /* Codex 답 마크다운 */
+  .md { margin-top: 4px; padding: 10px 12px; border-radius: 4px; background: var(--vscode-textCodeBlock-background); max-height: 420px; overflow: auto; line-height: 1.6; word-break: break-word; }
+  .md > :first-child { margin-top: 0; }
+  .md > :last-child { margin-bottom: 0; }
+  .md h1, .md h2, .md h3, .md h4 { font-size: 13px; font-weight: 600; margin: 14px 0 6px; color: var(--vscode-foreground); }
+  .md p, .md ul, .md ol { margin: 6px 0; }
+  .md ul, .md ol { padding-left: 20px; }
+  .md li { display: list-item; border: 0; padding: 1px 0; }
+  .md strong { font-weight: 600; }
+  .md code { font: 12px var(--vscode-editor-font-family); padding: 1px 4px; border-radius: 3px; background: var(--vscode-editor-background); }
+  .md pre { background: var(--vscode-editor-background); max-height: none; }
+  .md pre code { padding: 0; background: none; }
+  .md table { border-collapse: collapse; margin: 8px 0; font-size: 12px; width: 100%; }
+  .md th, .md td { border: 1px solid var(--vscode-panel-border); padding: 4px 8px; text-align: left; vertical-align: top; }
+  .md th { font-weight: 600; background: var(--vscode-editor-background); }
+  .md a { color: var(--vscode-textLink-foreground); }
+  .turn.me pre { background: var(--vscode-input-background); }
+  .cxsend { margin-top: 12px; }
+  .cxsend textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 6px 8px; font: 13px/1.5 var(--vscode-font-family); color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 4px; }
+  .cxsend textarea:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+  .cxsend .row { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+  .sw { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--vscode-descriptionForeground); cursor: pointer; }
+  .send { all: unset; cursor: pointer; padding: 4px 12px; border-radius: 4px; font-weight: 500; background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  .send:hover { background: var(--vscode-button-hoverBackground); }
+  .send[disabled], .cxsend textarea[disabled] { opacity: .5; cursor: default; }
+  pre { margin: 4px 0 0; padding: 8px; white-space: pre-wrap; word-break: break-word; font: 12px/1.5 var(--vscode-editor-font-family); background: var(--vscode-textCodeBlock-background); border-radius: 4px; max-height: 240px; overflow: auto; }
+  .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 7px; }
+  @media (min-width: 560px) { ul.cats { display: grid; grid-template-columns: 1fr 1fr; column-gap: 32px; } ul.cats li:last-child { border-bottom: 1px solid var(--vscode-panel-border); } }
+  /* 결과물 탭 */
+  .out { margin-bottom: 20px; }
+  .out .cap { margin-bottom: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+  .thumb { all: unset; cursor: zoom-in; position: relative; aspect-ratio: 4 / 3; border-radius: 6px; overflow: hidden; background: var(--vscode-editorWidget-background, #8882); }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .2s; }
+  .thumb:hover img { transform: scale(1.03); }
+  .thumb:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+  .thumb.file, .thumb.gone { display: flex; align-items: center; justify-content: center; padding: 8px; box-sizing: border-box; text-align: center; font-size: 12px; color: var(--vscode-descriptionForeground); word-break: break-all; }
+  .thumb.gone { cursor: default; }
+  /* 라이트박스 */
+  #lb { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px 56px; box-sizing: border-box; background: rgba(0, 0, 0, .85); opacity: 0; pointer-events: none; transition: opacity .2s; }
+  #lb.on { opacity: 1; pointer-events: auto; }
+  #lb img { max-width: 100%; max-height: calc(100vh - 120px); object-fit: contain; border-radius: 4px; transform: scale(.96); transition: transform .2s; }
+  #lb.on img { transform: scale(1); }
+  #lb .meta { color: #ddd; font-size: 12px; text-align: center; max-width: 100%; }
+  #lb .meta a { color: #9cdcfe; }
+  #lb button { all: unset; cursor: pointer; position: absolute; color: #eee; font-size: 22px; width: 40px; height: 40px; border-radius: 20px; display: flex; align-items: center; justify-content: center; background: rgba(255, 255, 255, .1); }
+  #lb button:hover { background: rgba(255, 255, 255, .2); }
+  #lb .x { top: 12px; right: 12px; font-size: 18px; }
+  #lb .prev { left: 8px; top: 50%; transform: translateY(-50%); }
+  #lb .next { right: 8px; top: 50%; transform: translateY(-50%); }
+  @media (prefers-reduced-motion: reduce) { #lb, #lb img, .thumb img { transition: none; } }
+</style></head>
+<body>
+<header><div class="title" id="title">Claude 진행판</div><nav><div id="tabs"></div><button id="colbtn" title="탭 고르기" aria-label="탭 고르기" aria-haspopup="menu"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></button><div id="tabmenu" role="menu"><div class="mh" id="mh"></div><ul id="tablist"></ul><div class="mf"><button data-reset>기본값으로</button></div></div><span id="ind"></span></nav></header>
+<main id="main"><p class="muted">불러오는 중이에요.</p></main>
+<div id="lb" role="dialog" aria-label="크게 보기"><button class="x" data-lb="close" aria-label="닫기">✕</button><button class="prev" data-lb="prev" aria-label="이전">‹</button><img alt=""><div class="meta"></div><button class="next" data-lb="next" aria-label="다음">›</button></div>
+<script>
+const vscode = acquireVsCodeApi()
+const saved = vscode.getState() || {}
+let tab = saved.tab || 'plan', showAll = !!saved.all
+const read = new Set(saved.read || []), seen = new Set(saved.seen || [])
+// ponytail: 읽은 보고 ID 를 계속 쌓는다. 너무 많아지면 최근 것만 남기기
+// 탭 순서·켜고 끄기: 공통 설정(G) + 세션 ID 별 예외(per). order·hidden 은 지금 보고 있는 쪽
+let G = { order: saved.order || [], hidden: saved.hidden || [] }, per = saved.per || {}, sid = null
+let order = [], hidden = new Set()
+const own = () => !!(sid && per[sid])
+function loadCfg() { const c = own() ? per[sid] : G; order = c.order.slice(); hidden = new Set(c.hidden) }
+loadCfg()
+const save = () => {
+  const c = { order, hidden: [...hidden] }
+  own() ? per[sid] = c : G = c
+  vscode.setState({ tab, all: showAll, read: [...read].slice(-2000), seen: [...seen], order: G.order, hidden: G.hidden, per })
+}
+let d = null
+const esc = t => String(t ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+const ago = at => {
+  if (!at) return ''
+  const m = Math.round((Date.now() - new Date(at)) / 60000)
+  if (m < 1) return '방금'
+  if (m < 60) return m + '분 전'
+  if (m < 1440) return Math.round(m / 60) + '시간 전'
+  return Math.round(m / 1440) + '일 전'
+}
+const STATUS = { running: '실행 중', done: '끝남', failed: '실패', killed: '멈춤', stopped: '멈춤' }
+
+function parsePlan(text) {
+  let goal = ''
+  const items = []
+  const notes = []
+  for (const l of text.split('\n')) {
+    let m
+    if (!goal && (m = l.match(/^#+\s+(.*)/))) goal = m[1]
+    else if ((m = l.match(/^\s*[-*]\s+\[([ xX])\]\s+(.*)/))) {
+      const [t, ...memo] = m[2].split(' - ')
+      items.push({ done: m[1] !== ' ', t, memo: memo.join(' - ') })
+    } else if (l.trim()) notes.push(l.trim())
+  }
+  return { goal, items, notes }
+}
+
+function views() {
+  const p = parsePlan(d.plan || '')
+  const done = p.items.filter(i => i.done).length
+  const pct = p.items.length ? Math.round(done / p.items.length * 100) : 0
+  const plan = !p.items.length && !p.goal
+    ? '<p class="muted">아직 진행판이 없어요. 단계가 여럿인 일을 시키면 Claude 가 여기에 목록을 올려요.</p>'
+    : '<h2>' + esc(p.goal || '진행판') + '</h2>'
+      + '<div class="muted">' + done + '/' + p.items.length + ' 끝남</div>'
+      + '<div class="bar"><i style="width:' + pct + '%"></i></div>'
+      + '<ul>' + p.items.map(i => '<li class="' + (i.done ? 'done' : '') + '"><span class="ic">' + (i.done ? '✓' : '○') + '</span><span class="grow"><span class="t">' + esc(i.t) + '</span>' + (i.memo ? '<span class="memo">' + esc(i.memo) + '</span>' : '') + '</span></li>').join('') + '</ul>'
+      + p.notes.map(n => '<p class="muted">' + esc(n) + '</p>').join('')
+
+  const c = d.ctx
+  const u = d.usage && d.usage.context
+  // mod 기록이 있으면 그 값을 쓴다. 없으면 창 크기를 모델 이름으로 어림한다(haiku 200K, 그 밖은 1M)
+  const win = u && u.window || (c && /haiku/.test(c.model) ? 200000 : 1000000)
+  const used = u && u.tokens != null ? u.tokens : c ? c.used : 0
+  const cpct = u && u.percent != null ? Math.round(u.percent) : c ? Math.min(100, Math.round(used / win * 100)) : 0
+  const K = n => (n / 1000).toFixed(1) + 'K'
+  // 이름과 색은 항목마다 고정한다. 색은 테마의 차트 색을 따른다
+  const CAT = {
+    'Messages': ['대화', 'blue'], 'System tools': ['기본 도구', 'purple'], 'Skills': ['스킬', 'green'],
+    'MCP server instructions': ['MCP 안내문', 'orange'], 'MCP tools': ['MCP 도구', 'orange'], 'Memory files': ['메모리 파일', 'yellow'],
+    'System prompt': ['시스템 프롬프트', 'red'], 'Custom agents': ['에이전트 정의', 'cyan'],
+    'Autocompact buffer': ['자동 압축 여유분', 'gray'], 'Free space': ['남은 공간', 'gray'],
+  }
+  const COLOR = { blue: 'var(--vscode-charts-blue)', purple: 'var(--vscode-charts-purple)', green: 'var(--vscode-charts-green)', orange: 'var(--vscode-charts-orange)', yellow: 'var(--vscode-charts-yellow)', red: 'var(--vscode-charts-red)', cyan: 'var(--vscode-terminal-ansiCyan)', gray: 'var(--vscode-descriptionForeground)' }
+  // deferred 는 실제로 컨텍스트에 올라가지 않은 대기 항목이라 뺀다
+  const cats = (u && u.categories || []).filter(x => x.tokens > 0 && x.kind !== 'deferred').map(x => {
+    const [name, color] = CAT[x.name] || [x.name, 'gray']
+    return { ...x, name, color: COLOR[color] }
+  }).sort((a, b) => (a.kind === 'used' ? 0 : 1) - (b.kind === 'used' ? 0 : 1) || b.tokens - a.tokens)
+  const w = n => (n / win * 100).toFixed(2) + '%'
+  const stack = cats.filter(x => x.kind === 'used').map(x => '<i title="' + esc(x.name) + '" style="width:' + w(x.tokens) + ';background:' + x.color + '"></i>').join('')
+    + cats.filter(x => x.kind === 'buffer').map(x => '<i class="buf" title="' + esc(x.name) + '" style="width:' + w(x.tokens) + '"></i>').join('')
+  const catRows = !cats.length ? ''
+    : '<h3>항목별</h3><ul class="cats">' + cats.map(x => '<li class="' + (x.kind === 'used' ? '' : 'done') + '"><span class="dot" style="background:' + x.color + '"></span><span class="grow"><span class="t">' + esc(x.name) + '</span><span class="mini"><i style="width:' + Math.max(0.5, x.tokens / win * 100) + '%;background:' + x.color + '"></i></span></span><span class="num">' + K(x.tokens) + '</span></li>').join('') + '</ul>'
+  const LIMIT = { five_hour: '5시간 한도', seven_day: '주간 한도' }
+  const when = t => { const x = new Date(t); const p = n => String(n).padStart(2, '0'); return p(x.getMonth() + 1) + '.' + p(x.getDate()) + ' ' + p(x.getHours()) + ':' + p(x.getMinutes()) }
+  // 초기화 시각이 지난 창은 이미 새로 시작했으니 뺀다
+  const limits = (d.limits && d.limits.rateLimits || []).filter(l => !l.resetsAt || new Date(l.resetsAt) > Date.now())
+  const limitRows = !limits.length ? ''
+    : '<h3>사용 한도 <span class="muted">· ' + ago(d.limits.at) + ' 기준</span></h3><ul>' + limits.map(l => { const left = Math.max(0, 100 - Math.round(l.percentUsed)); return '<li><span class="grow"><span class="t">' + esc(LIMIT[l.kind] || l.kind) + '</span><span class="bar' + (left <= 20 ? ' warn' : '') + '"><i style="width:' + Math.round(l.percentUsed) + '%"></i></span>' + (l.resetsAt ? '<span class="memo">' + when(l.resetsAt) + ' 초기화</span>' : '') + '</span><span class="num">' + left + '% 남음</span></li>' }).join('') + '</ul>'
+  const ctx = !c && !u ? '<p class="muted">아직 응답이 없어요.</p>'
+    : '<div class="big">' + cpct + '%</div>'
+      + (stack ? '<div class="bar stack">' + stack + '</div>' : '<div class="bar' + (cpct >= 80 ? ' warn' : '') + '"><i style="width:' + cpct + '%"></i></div>')
+      + '<div class="muted">' + K(used) + ' / ' + (win / 1000) + 'K 토큰</div>'
+      + catRows + limitRows
+      + '<h3>세션</h3><ul>' + (c ? '<li><span class="grow">모델</span><span>' + esc(c.model) + '</span></li>' : '')
+      + (d.usage && d.usage.cost != null ? '<li><span class="grow">비용</span><span>$' + d.usage.cost.toFixed(2) + '</span></li>' : '')
+      + (c ? '<li><span class="grow">마지막 응답</span><span>' + ago(c.at) + '</span></li>' : '') + '</ul>'
+      + (u ? '' : '<p class="muted">항목별 비율과 사용 한도는 이 세션에서 답이 한 번 끝나면 보여요.</p>')
+
+  const agents = !d.agents.length ? '<p class="muted">이 세션에서 띄운 에이전트가 없어요.</p>'
+    : '<ul>' + d.agents.map(a => '<li><span class="grow">' + esc(a.name) + '<span class="memo">' + esc(a.type) + (a.model ? ' · ' + esc(a.model) : '') + ' · ' + ago(a.at) + '</span></span><span><span class="badge ' + a.status + '">' + (STATUS[a.status] || esc(a.status)) + '</span></span></li>').join('') + '</ul>'
+
+  const rel = p => d.cwd && p.startsWith(d.cwd + '/') ? p.slice(d.cwd.length + 1) : p.replace(/^\/Users\/[^/]+/, '~')
+  const files = !d.files.length ? '<p class="muted">이 세션에서 바꾼 파일이 없어요.</p>'
+    : '<ul>' + d.files.map(f => '<li><span class="grow"><a data-open="' + esc(f.p) + '">' + esc(rel(f.p)) + '</a><span class="memo">' + f.n + '번 수정 · ' + ago(f.at) + '</span></span></li>').join('') + '</ul>'
+
+  const dur = ms => { const sec = Math.round(ms / 1000); return sec < 60 ? sec + '초' : Math.floor(sec / 60) + '분 ' + (sec % 60) + '초' }
+  const codexList = d.codex || []
+  // Codex 한도는 계정 단위라 이 세션이 시킨 일이 없어도 보여 준다
+  const cl = d.codexLimits
+  const WIN = { 300: '5시간 한도', 10080: '주간 한도' }
+  // Codex 가 주는 요금제 값을 화면용 이름으로
+  const PLAN = {
+    free: '무료', go: 'Go', plus: 'Plus', pro: 'Pro', prolite: 'Pro Lite', promax: 'Pro Max', team: '팀',
+    business: '비즈니스', self_serve_business_prolite: '비즈니스 Pro Lite', self_serve_business_usage_based: '비즈니스 사용량제',
+    enterprise: '엔터프라이즈', edu: '교육', education: '교육',
+  }
+  const cwins = cl && cl.windows ? cl.windows.filter(x => !x.resets_at || x.resets_at * 1000 > Date.now()) : []
+  const codexLimitRows = cl && cl.none ? '<h3>Codex 한도</h3><p class="muted">지금 로그인한 계정은 아직 Codex 를 쓴 기록이 없어요. 한 번 쓰면 보여요.</p>'
+    : !cwins.length ? ''
+    : '<h3>Codex 한도 <span class="muted">· ' + (cl.plan ? esc(PLAN[cl.plan] || cl.plan) + ' · ' : '') + ago(cl.at) + ' 기준</span></h3><ul>' + cwins.map(x => {
+      const left = Math.max(0, 100 - Math.round(x.used_percent))
+      return '<li><span class="grow"><span class="t">' + esc(WIN[x.window_minutes] || Math.round(x.window_minutes / 60) + '시간 한도') + '</span><span class="bar' + (left <= 20 ? ' warn' : '') + '"><i style="width:' + Math.round(x.used_percent) + '%"></i></span>' + (x.resets_at ? '<span class="memo">' + when(x.resets_at * 1000) + ' 초기화</span>' : '') + '</span><span class="num">' + left + '% 남음</span></li>'
+    }).join('') + '</ul>'
+  const codexRuns = !codexList.length ? '<p class="muted">이 세션에서 Codex 에 시킨 일이 없어요.</p>'
+    : '<ul>' + codexList.map(r => {
+      const head = '<span class="grow"><span class="t one">' + esc(r.prompt.split('\n')[0] || '요청 없음') + '</span><span class="memo">' + [r.model, r.ms ? dur(r.ms) : '', r.tokens ? (r.tokens / 1000).toFixed(1) + 'K 토큰' : '', ago(r.start)].filter(Boolean).map(esc).join(' · ') + '</span></span><span><span class="badge ' + r.status + '">' + (STATUS[r.status] || esc(r.status)) + '</span></span>'
+      const turns = (r.turns || []).map(t => '<div class="turn ' + t.who + '"><div class="who">' + (t.who === 'me' ? '보낸 말' : 'Codex') + ' · ' + ago(t.at) + '</div>' + (t.html ? '<div class="md">' + t.html + '</div>' : '<pre>' + esc(t.text) + '</pre>') + '</div>').join('')
+      const busy = r.status === 'running'
+      const form = '<div class="cxsend"><textarea data-draft="' + esc(r.file) + '" rows="2" placeholder="' + (busy ? 'Codex 가 답하는 중이에요' : '이어서 보낼 말을 쓰세요. Cmd+Enter 로 보내요') + '"' + (busy ? ' disabled' : '') + '>' + esc(drafts.get(r.file) || '') + '</textarea>'
+        + '<div class="row"><label class="sw"><input type="checkbox" data-write="' + esc(r.file) + '"' + (writes.has(r.file) ? ' checked' : '') + '> 파일 수정 허용</label><button class="send" data-send="' + esc(r.file) + '"' + (busy ? ' disabled' : '') + '>보내기</button></div></div>'
+      const key = 'cx:' + r.file
+      return '<li class="cx exp' + (opened.has(key) ? ' open' : '') + '"><div class="exp-head" data-exp="' + esc(key) + '">' + head + '<span class="chev">›</span></div>'
+        + '<div class="exp-body"><div><div class="cxbody">' + turns + form + '</div></div></div></li>'
+    }).join('') + '</ul>'
+  const codex = codexLimitRows + (codexLimitRows ? '<h3>이 세션이 시킨 일</h3>' : '') + codexRuns
+
+  const IMG = /\.(png|jpe?g|gif|webp|svg|avif)$/i
+  const groups = d.outputs || []
+  shots = []
+  const out = !groups.length ? '<p class="muted">이 세션에서 Claude 가 보내거나 열어 본 이미지가 없어요.</p>'
+    : groups.map(g => '<div class="out"><div class="cap">' + (g.caption ? esc(g.caption) : g.viewed ? 'Claude 가 열어 본 이미지' : '<span class="muted">설명 없음</span>') + '<span class="memo">' + g.files.length + '개 · ' + ago(g.at) + '</span></div><div class="grid">'
+      + g.files.map(f => {
+        const name = f.p.split('/').pop()
+        if (f.gone) return '<span class="thumb gone" title="' + esc(f.p) + '">지워진 파일이에요<br>' + esc(name) + '</span>'
+        if (!IMG.test(f.p)) return '<button class="thumb file" data-open="' + esc(f.p) + '" title="' + esc(f.p) + '">' + esc(name) + '</button>'
+        shots.push({ ...f, caption: g.caption })
+        return '<button class="thumb" data-shot="' + (shots.length - 1) + '" title="' + esc(name) + '"><img loading="lazy" src="' + esc(f.uri) + '" alt="' + esc(name) + '"></button>'
+      }).join('') + '</div></div>').join('')
+
+  const plain = t => t.replace(/```[\s\S]*?```/g, ' ').replace(/[#*`|>_-]+/g, ' ').replace(/\s+/g, ' ').trim()
+  const reps = (d.reports || []).filter(r => showAll || r.tools > 0)
+  const unread = reps.filter(r => !read.has(r.id)).length
+  const rep = '<div class="reptop"><label class="sw"><input type="checkbox" data-allrep' + (showAll ? ' checked' : '') + '> 말로만 답한 것도 보기</label></div>'
+    + (!reps.length ? '<p class="muted">아직 결과보고가 없어요.</p>'
+    : reps.map(r => {
+      const key = 'rep:' + r.id
+      return '<div class="rep exp' + (opened.has(key) ? ' open' : '') + '"><div class="exp-head" data-exp="' + esc(key) + '" data-rep="' + esc(r.id) + '">'
+        + (read.has(r.id) ? '<span class="readpad"></span>' : '<span class="unread" title="안 읽음"></span>')
+        + '<span class="grow"><span class="t one">' + (r.by === 'agent' ? '<span class="badge by">에이전트 완료 뒤</span>' : '') + esc(r.ask || '요청 없음') + '</span>'
+        + '<span class="memo">' + ago(r.at) + (r.tools ? ' · 도구 ' + r.tools + '번' : '') + '</span><span class="peek">' + esc(plain(r.text).slice(0, 300)) + '</span></span><span class="chev">›</span></div>'
+        + '<div class="exp-body"><div>' + (r.html ? '<div class="md">' + r.html + '</div>' : '<pre>' + esc(r.text) + '</pre>') + '</div></div></div>'
+    }).join(''))
+
+  return { plan, rep, ctx, agents, files, codex, out, counts: { rep: unread || '', out: groups.reduce((n, g) => n + g.files.length, 0) || '', plan: p.items.length ? done + '/' + p.items.length : '', ctx: c ? cpct + '%' : '', agents: d.agents.filter(a => a.status === 'running').length || '', files: d.files.length || '', codex: codexList.filter(r => r.status === 'running').length || '' } }
+}
+
+// 펼친 항목(결과보고·코덱스). 다시 그려도 그대로 열려 있게
+const opened = new Set()
+// 다시 그려도 쓰던 글과 스위치가 남도록 따로 들고 있는다
+const drafts = new Map(), writes = new Set()
+document.addEventListener('input', e => {
+  if (e.target.dataset.draft) drafts.set(e.target.dataset.draft, e.target.value)
+  if ('allrep' in e.target.dataset) { showAll = e.target.checked; save(); draw() }
+  if (e.target.dataset.write) e.target.checked ? writes.add(e.target.dataset.write) : writes.delete(e.target.dataset.write)
+})
+function sendCx(file) {
+  const text = (drafts.get(file) || '').trim()
+  if (!text) return
+  vscode.postMessage({ codexSend: { file, text, write: writes.has(file) } })
+  drafts.delete(file)
+  draw()
+}
+document.addEventListener('keydown', e => {
+  if (e.target.dataset && e.target.dataset.draft && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendCx(e.target.dataset.draft) }
+})
+// 펼치고 접을 때는 그 항목만 class 를 바꿔 애니메이션이 보이게 하고, 숫자는 끝난 뒤 다시 그린다
+let redrawTimer = null
+document.addEventListener('click', e => {
+  const hd = e.target.closest('[data-exp]')
+  if (!hd) return
+  const box = hd.closest('.exp'), key = hd.dataset.exp, open = !opened.has(key)
+  open ? opened.add(key) : opened.delete(key)
+  box.classList.toggle('open', open)
+  if (hd.dataset.rep && !read.has(hd.dataset.rep)) {
+    read.add(hd.dataset.rep)
+    save()
+    const dot = hd.querySelector('.unread')
+    if (dot) dot.className = 'readpad'
+  }
+  clearTimeout(redrawTimer)
+  redrawTimer = setTimeout(draw, 320)
+})
+
+function placeInd() {
+  const on = document.querySelector('#tabs .on'), ind = document.getElementById('ind'), tabs = document.getElementById('tabs')
+  if (!on) return
+  ind.style.width = on.offsetWidth + 'px'
+  ind.style.transform = 'translateX(' + (on.offsetLeft - tabs.scrollLeft) + 'px)'
+}
+document.getElementById('tabs').addEventListener('scroll', placeInd)
+
+const TABS = [['plan', '진행판'], ['rep', '결과보고'], ['ctx', '컨텍스트'], ['agents', '에이전트'], ['codex', '코덱스'], ['out', '결과물'], ['files', '바뀐 파일']]
+// 내가 정한 순서대로. 순서에 없는 새 탭은 뒤에 붙는다
+const ordered = () => TABS.slice().sort((a, b) => {
+  const i = order.indexOf(a[0]), j = order.indexOf(b[0])
+  return (i < 0 ? 99 : i) - (j < 0 ? 99 : j)
+})
+
+// 끌어서 순서 바꾸기(탭 줄 가로, 메뉴 세로 공용): 잡은 것은 커서를 따라가고, 나머지는 비켜서며 미끄러진다
+let drag = null, justDragged = false
+function sortable(list, { axis, handle, start, end }) {
+  const X = axis === 'x'
+  const pos = e => X ? e.clientX : e.clientY
+  const off = el => X ? el.offsetLeft : el.offsetTop
+  const edge = r => X ? [r.left, r.right] : [r.top, r.bottom]
+  list.addEventListener('pointerdown', e => {
+    const item = e.target.closest('[data-key]')
+    if (!item || e.button !== 0 || (handle && !e.target.closest(handle))) return
+    drag = { list, item, p: pos(e), o: off(item), moved: false, id: e.pointerId }
+    if (handle) e.preventDefault()
+  })
+  window.addEventListener('pointermove', e => {
+    if (!drag || drag.list !== list || e.pointerId !== drag.id) return
+    const d = pos(e) - drag.p
+    if (!drag.moved) {
+      if (Math.abs(d) < 5) return
+      drag.moved = true
+      list.setPointerCapture(e.pointerId)
+      drag.item.classList.add('dragging')
+      drag.item.style.transition = 'none'
+      if (start) start()
+    }
+    const items = [...list.children], c = pos(e)
+    const target = items.find(b => { if (b === drag.item) return false; const [a1, a2] = edge(b.getBoundingClientRect()); return c > a1 && c < a2 })
+    if (target) {
+      const [a1, a2] = edge(target.getBoundingClientRect()), ref = c > (a1 + a2) / 2 ? target.nextSibling : target
+      if (ref !== drag.item && ref !== drag.item.nextSibling) {
+        const before = new Map(items.map(b => [b, edge(b.getBoundingClientRect())[0]]))
+        list.insertBefore(drag.item, ref)
+        for (const b of items) {
+          if (b === drag.item) continue
+          const d0 = before.get(b) - edge(b.getBoundingClientRect())[0]
+          if (!d0) continue
+          b.style.transition = 'none'
+          b.style.transform = (X ? 'translateX(' : 'translateY(') + d0 + 'px)'
+          requestAnimationFrame(() => { b.style.transition = 'transform .2s cubic-bezier(.2, .8, .2, 1)'; b.style.transform = '' })
+        }
+      }
+    }
+    drag.item.style.transform = (X ? 'translateX(' : 'translateY(') + (d - (off(drag.item) - drag.o)) + 'px)'
+  })
+  window.addEventListener('pointerup', e => {
+    if (!drag || drag.list !== list || e.pointerId !== drag.id) return
+    const { item, moved } = drag
+    drag = null
+    if (!moved) return
+    justDragged = true
+    setTimeout(() => { justDragged = false }, 0)
+    // 놓으면 제자리로 살짝 미끄러져 들어간다
+    item.style.transition = 'transform .2s cubic-bezier(.2, .8, .2, 1)'
+    item.style.transform = ''
+    item.classList.remove('dragging')
+    end([...list.children].map(b => b.dataset.key))
+  })
+}
+
+const tabsEl = document.getElementById('tabs')
+sortable(tabsEl, {
+  axis: 'x',
+  start: () => { document.getElementById('ind').style.opacity = '0' },
+  // 탭 줄에는 숨긴 탭이 없으니, 숨긴 탭은 원래 자리 순서를 지키며 뒤에 붙인다
+  end: keys => { order = keys.concat(ordered().map(([k]) => k).filter(k => !keys.includes(k))); save(); setTimeout(() => { document.getElementById('ind').style.opacity = ''; draw(); renderMenu() }, 220) },
+})
+
+// 탭 고르기 메뉴
+const menu = document.getElementById('tabmenu'), colbtn = document.getElementById('colbtn'), tablist = document.getElementById('tablist')
+const GRIP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg>'
+function renderMenu() {
+  document.getElementById('mh').innerHTML = '<div class="mrow"><span>표시할 탭</span><label class="sw"><input type="checkbox" id="own"' + (own() ? ' checked' : '') + (sid ? '' : ' disabled') + '> 이 세션만 따로</label></div>'
+    + (own() ? '<div class="mnote">이 세션만 따로 쓰는 중이에요. 끄면 공통 설정으로 돌아가요.</div>' : '')
+  const shown = ordered().filter(([k]) => !hidden.has(k)).length
+  tablist.innerHTML = ordered().map(([k, n]) => {
+    const on = !hidden.has(k), last = on && shown === 1
+    return '<li data-key="' + k + '"><span class="grip" title="끌어서 순서 바꾸기">' + GRIP + '</span><label><input type="checkbox" data-show="' + k + '"' + (on ? ' checked' : '') + (last ? ' disabled title="탭은 하나 이상 보여야 해요"' : '') + '> ' + n + '</label></li>'
+  }).join('')
+}
+sortable(tablist, { axis: 'y', handle: '.grip', end: keys => { order = keys; save(); draw() } })
+const setMenu = on => { menu.classList.toggle('on', on); colbtn.classList.toggle('on', on); colbtn.setAttribute('aria-expanded', on) }
+colbtn.addEventListener('click', () => { if (!menu.classList.contains('on')) renderMenu(); setMenu(!menu.classList.contains('on')) })
+document.addEventListener('click', e => { if (menu.classList.contains('on') && !e.target.closest('#tabmenu, #colbtn')) setMenu(false) })
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && menu.classList.contains('on')) setMenu(false) })
+document.getElementById('mh').addEventListener('change', e => {
+  if (e.target.id !== 'own' || !sid) return
+  // 켜면 지금 공통 설정을 복사해 시작하고, 끄면 이 세션 설정을 지운다
+  if (e.target.checked) per[sid] = { order: order.slice(), hidden: [...hidden] }
+  else delete per[sid]
+  loadCfg(); save(); renderMenu(); draw()
+})
+tablist.addEventListener('change', e => {
+  const k = e.target.dataset.show
+  if (!k) return
+  e.target.checked ? hidden.delete(k) : hidden.add(k)
+  save(); renderMenu(); draw()
+})
+menu.querySelector('[data-reset]').addEventListener('click', () => { order = []; hidden.clear(); save(); renderMenu(); draw() })
+function draw() {
+  if (!d) return
+  // 저장해 둔 탭이 빠진 탭이면 진행판으로
+  const visible = ordered().filter(([k]) => !hidden.has(k))
+  if (!visible.some(([k]) => k === tab)) tab = visible[0][0]
+  const v = views()
+  document.getElementById('title').textContent = d.label
+  // 끄는 중에는 탭 줄을 다시 그리지 않는다
+  if (!drag) document.getElementById('tabs').innerHTML = visible.map(([k, n]) => '<button data-tab="' + k + '" data-key="' + k + '" class="' + (k === tab ? 'on' : '') + '">' + n + (v.counts[k] ? '<span class="n">' + v.counts[k] + '</span>' : '') + '</button>').join('')
+  const f = document.activeElement, keep = f && f.dataset && f.dataset.draft ? [f.dataset.draft, f.selectionStart, f.selectionEnd] : null
+  document.getElementById('main').innerHTML = v[tab]
+  if (keep) {
+    const t = [...document.querySelectorAll('[data-draft]')].find(x => x.dataset.draft === keep[0])
+    if (t && !t.disabled) { t.focus(); t.setSelectionRange(keep[1], keep[2]) }
+  }
+  const on = document.querySelector('#tabs .on')
+  on.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  placeInd()
+}
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-tab]')
+  if (b && !justDragged) { tab = b.dataset.tab; save(); draw() }
+  const a = e.target.closest('[data-open]')
+  if (a) vscode.postMessage({ open: a.dataset.open })
+  // 마크다운 안의 파일 링크(/경로:줄)는 Cursor 에서 연다
+  const ml = e.target.closest('.md a[href]')
+  if (ml) {
+    e.preventDefault()
+    const href = decodeURI(ml.getAttribute('href'))
+    if (href.startsWith('/')) vscode.postMessage({ open: href.replace(/:\d+(:\d+)?$/, '') })
+    else if (/^https?:/.test(href)) vscode.postMessage({ url: href })
+  }
+  const sb = e.target.closest('[data-send]')
+  if (sb && !sb.disabled) sendCx(sb.dataset.send)
+  const t = e.target.closest('[data-shot]')
+  if (t) show(+t.dataset.shot)
+  const l = e.target.closest('[data-lb]')
+  if (l) l.dataset.lb === 'close' ? hide() : step(l.dataset.lb === 'next' ? 1 : -1)
+  else if (e.target.id === 'lb') hide()
+})
+
+// 라이트박스: 이 탭의 이미지를 한 줄로 이어 좌우로 넘긴다
+let shots = [], at = -1
+const lb = document.getElementById('lb')
+function show(i) {
+  if (!shots.length) return
+  at = (i + shots.length) % shots.length
+  const f = shots[at]
+  lb.querySelector('img').src = f.uri
+  lb.querySelector('.meta').innerHTML = (f.caption ? esc(f.caption) + '<br>' : '') + (at + 1) + ' / ' + shots.length + ' · <a data-open="' + esc(f.p) + '">' + esc(f.p.split('/').pop()) + ' 열기</a>'
+  lb.querySelectorAll('.prev, .next').forEach(b => b.style.display = shots.length > 1 ? '' : 'none')
+  lb.classList.add('on')
+}
+function hide() { lb.classList.remove('on'); at = -1 }
+function step(n) { show(at + n) }
+document.addEventListener('keydown', e => {
+  if (at < 0) return
+  if (e.key === 'Escape') hide()
+  else if (e.key === 'ArrowRight') step(1)
+  else if (e.key === 'ArrowLeft') step(-1)
+})
+window.addEventListener('message', e => {
+  const m = e.data
+  if (m.loading || m.empty) {
+    d = null
+    document.getElementById('title').textContent = m.loading || 'Claude 진행판'
+    document.getElementById('tabs').innerHTML = ''
+    document.getElementById('ind').style.width = '0'
+    document.getElementById('main').innerHTML = '<p class="muted">' + esc(m.empty || '세션 기록을 읽는 중이에요. 큰 세션은 몇 초 걸려요.') + '</p>'
+    return
+  }
+  d = m
+  // 세션이 바뀌면 그 세션 설정(없으면 공통)을 불러온다
+  if (d.sid !== sid) { sid = d.sid; loadCfg(); if (menu.classList.contains('on')) renderMenu() }
+  // 세션을 처음 볼 때 이미 있던 보고는 읽은 것으로 친다. 그 뒤에 생긴 것만 안 읽음
+  if (!seen.has(d.label)) { seen.add(d.label); (d.reports || []).forEach(r => read.add(r.id)); save() }
+  draw()
+})
+setInterval(draw, 60000)
+vscode.postMessage({ ready: true })
+</script>
+</body></html>

@@ -1,0 +1,17 @@
+{
+  "name": "claude-side-panel",
+  "displayName": "Claude 진행판",
+  "description": "보고 있는 Claude Code 세션의 진행판, 결과보고, 컨텍스트, 에이전트, Codex, 결과물, 바뀐 파일을 오른쪽 탭에 보여 줍니다.",
+  "version": "0.2.0",
+  "publisher": "leesangjun",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/HOLYMOLYJUN/claude-side-panel" },
+  "engines": { "vscode": "^1.98.0" },
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      { "command": "claudeSidePanel.open", "title": "Claude 진행판 열기" }
+    ]
+  }
+}

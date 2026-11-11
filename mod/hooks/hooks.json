@@ -1,0 +1,11 @@
+{
+  "modules": ["./register.ts"],
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "^(startup|resume|clear|compact)$", "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/session-plan.sh\"", "timeout": 5 }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/plan-reminder.sh\"", "timeout": 5 }] }
+    ]
+  }
+}
