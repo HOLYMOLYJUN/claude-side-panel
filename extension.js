@@ -15,9 +15,34 @@ const SKIP = /^\{"type":"(api-request|atis-latch|pr-link|last-prompt|queue-opera
 const TITLE_RE = /"(?:customTitle|agentName|aiTitle)":"((?:[^"\\]|\\.)*)"/g
 const EDIT_TOOLS = ['Edit', 'Write', 'NotebookEdit']
 const IMG_RE = /\.(png|jpe?g|gif|webp|avif)$/i
+// 결과보고에 붙일 검사 명령. 명령을 && ; | 로 나눈 조각의 맨 앞이 검사 도구일 때만 센다(heredoc 본문 · grep 인자는 빼고)
+const CHECKS = [
+  ['테스트', /^((npm|pnpm|yarn|bun)\s+(run\s+)?(\S+:)?test\b|npx\s+(vitest|jest|playwright test)\b|(vitest|jest|pytest|cargo test|go test|\.\/gradlew\s+\S*test)\b)/],
+  ['린트', /^((npm|pnpm|yarn|bun)\s+(run\s+)?(\S+:)?lint\b|(npx\s+)?(eslint|biome|stylelint|prettier\s+--check)\b)/],
+  ['타입 검사', /^((npm|pnpm|yarn|bun)\s+(run\s+)?(\S+:)?(typecheck|type-check)\b|(npx\s+)?tsc\b)/],
+  ['빌드', /^((npm|pnpm|yarn|bun)\s+(run\s+)?(\S+:)?build\b|(xcodebuild|swift build|cargo build|go build|\.\/gradlew\s+\S*build)\b|(bash\s+)?\S*build\.sh\b)/],
+  ['문법 검사', /^(node --check|python3? -m py_compile)\b/],
+]
+function checkKinds(cmd) {
+  const head = cmd.replace(/<<-?\s*['"]?(\w+)['"]?[\s\S]*?\n\1\b/g, '').replace(/\bzsh\s+-l?ic\s+['"]/g, ';')
+  const kinds = new Set()
+  for (const part of head.split(/&&|\|\||;|\||\n/)) {
+    const c = part.trim().replace(/^[(\s]+/, '')
+    const hit = CHECKS.find(([, re]) => re.test(c))
+    if (hit) kinds.add(hit[0])
+  }
+  return [...kinds]
+}
+// 주소 모음: 내 컴퓨터 · 사내망 · 흔한 미리보기 도메인만
+const URL_RE = /\bhttps?:\/\/[^\s"'<>`)\]\\]+/g
+const PREVIEW_HOST = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$|\.(vercel\.app|pages\.dev|workers\.dev|netlify\.app|trycloudflare\.com|ngrok-free\.app|ngrok\.app)$/
 
 let panel
 let lastLabel
+// 내 화면에서만 쓰는 모듈(local/module.js, git 에 안 올림). 없으면 아무것도 안 한다
+let local = null
+try { local = require('./local/module.js') } catch {}
+const helpers = { uri: p => panel.webview.asWebviewUri(vscode.Uri.file(p)).toString(), refresh: () => later() }
 let s // 지금 보여 주는 세션
 
 function activate(ctx) {
@@ -52,6 +77,8 @@ function openPanel() {
   panel.webview.onDidReceiveMessage(m => {
     if (m.codexSend) sendCodex(m.codexSend)
     if (m.url) vscode.env.openExternal(vscode.Uri.parse(m.url))
+    if (m.copyImage) copyImage(m.copyImage)
+    if (m.local && local && local.onMessage) local.onMessage(m.local, helpers)
     if (m.open) vscode.commands.executeCommand('vscode.open', vscode.Uri.file(m.open), { viewColumn: vscode.ViewColumn.One, preview: true })
     // 화면이 (다시) 뜨면 지금 자료를 다시 보낸다
     if (m.ready) s ? render() : lastLabel ? select(lastLabel) : post({ empty: 'Claude 세션 탭을 한 번 눌러 주세요.' })
@@ -59,6 +86,29 @@ function openPanel() {
   const page = path.join(__dirname, 'panel.html')
   fs.watchFile(page, { interval: 500 }, () => { if (panel) panel.webview.html = html() })
   panel.onDidDispose(() => { panel = undefined; fs.unwatchFile(page); stop() })
+}
+
+// 맥 알림: Cursor 창이 앞에 없을 때만. 처음 기록을 읽는 동안은 알리지 않는다
+// ponytail: osascript 알림이라 누르면 Cursor 가 아니라 스크립트 편집기가 열린다. 돌아가기가 필요하면 알림 앱을 따로
+function notify(cur, title, text) {
+  if (!cur.live || process.platform !== 'darwin' || vscode.window.state.focused) return
+  const body = text.replace(/```[\s\S]*?```/g, ' ').replace(/[#*`|>_]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140)
+  require('child_process').execFile('osascript', ['-e', 'on run a', '-e', 'display notification (item 2 of a) with title (item 1 of a) sound name "Glass"', '-e', 'end run', 'Claude · ' + title + ' · ' + cur.label, body])
+}
+
+// 이미지를 클립보드에 넣는다. ponytail: macOS 만(AppKit). 다른 OS 는 실패로 알림
+const COPY_JXA = 'function run(a){ObjC.import("AppKit");const i=$.NSImage.alloc.initWithContentsOfFile(a[0]);if(!i||i.isNil())throw new Error("x");$.NSPasteboard.generalPasteboard.clearContents;return $.NSPasteboard.generalPasteboard.writeObjects($([i]))}'
+function copyImage(p) {
+  if (process.platform !== 'darwin') return post({ copied: p, ok: false })
+  require('child_process').execFile('osascript', ['-l', 'JavaScript', '-e', COPY_JXA, p], err => post({ copied: p, ok: !err }))
+}
+
+// 지금 사내망 IP(맥은 en0 먼저). 바뀌어도 그릴 때마다 다시 읽는다
+function lanIp() {
+  const all = os.networkInterfaces()
+  const v4 = list => (list || []).find(a => a.family === 'IPv4' && !a.internal)
+  const a = v4(all.en0) || Object.values(all).map(v4).find(Boolean)
+  return a ? a.address : ''
 }
 
 function post(msg) {
@@ -73,17 +123,20 @@ async function select(label) {
   const id = path.basename(file, '.jsonl')
   const cur = s = {
     file, id, label, offset: 0, rest: Buffer.alloc(0), reading: null,
-    ctx: null, cwd: '', agents: new Map(), agentIds: new Map(), files: new Map(), codexCalls: [], codexFiles: new Set(), outputs: [], reports: new Map(), turn: null, msgId: '', msgText: '',
+    ctx: null, cwd: '', agents: new Map(), agentIds: new Map(), files: new Map(), codexCalls: [], urls: new Map(), checkIds: new Map(), codexFiles: new Set(), outputs: [], reports: new Map(), turn: null, msgId: '', msgText: '',
     planFile: path.join(PLANS, id + '.md'),
     usageFile: path.join(USAGE, id + '.json'),
   }
   await readNew(cur)
   if (s !== cur) return
+  cur.live = true // 여기부터 새로 생긴 일만 알린다
   render()
   fs.watchFile(cur.file, { interval: 1000 }, () => readNew(cur).then(() => s === cur && render()))
   fs.watchFile(cur.planFile, { interval: 1000 }, () => s === cur && render())
   fs.watchFile(cur.usageFile, { interval: 1000 }, () => s === cur && render())
   fs.watchFile(LIMITS, { interval: 1000 }, () => s === cur && render())
+  // 서버가 켜지고 꺼지는 것은 기록에 안 남으니 따로 다시 본다
+  cur.liveTimer = setInterval(() => s === cur && cur.urls.size && render(), 15000)
 }
 
 function stop() {
@@ -93,6 +146,7 @@ function stop() {
   fs.unwatchFile(s.usageFile)
   fs.unwatchFile(LIMITS)
   for (const f of s.codexFiles) fs.unwatchFile(f)
+  clearInterval(s.liveTimer)
   s = undefined
 }
 
@@ -143,7 +197,7 @@ function readNew(cur) {
     }
     cur.rest = rest
     cur.offset = size
-  })
+  }).catch(e => console.error('[claude-side-panel] 기록 읽기 실패', e)) // 실패해도 다음 읽기는 이어지게
   return cur.reading
 }
 
@@ -157,16 +211,32 @@ function line(cur, text) {
     const u = o.message.usage
     // 같은 답이 여러 줄로 나뉘어 들어오므로 메시지 ID 별로 글을 이어 붙인다
     if (o.message.id !== cur.msgId) { cur.msgId = o.message.id; cur.msgText = '' }
-    for (const c of content || []) if (c.type === 'text') cur.msgText += (cur.msgText ? '\n\n' : '') + c.text
+    for (const c of content || []) if (c.type === 'text') { cur.msgText += (cur.msgText ? '\n\n' : '') + c.text; urls(cur, c.text, o.timestamp) }
     if (cur.turn) cur.turn.tools += (content || []).filter(c => c.type === 'tool_use').length
     // 턴을 끝내며 쓴 글이 결과보고다
     if (o.message.stop_reason === 'end_turn' && cur.turn && cur.msgText.trim()) {
-      cur.reports.set(cur.msgId, { id: cur.msgId, at: o.timestamp, ask: cur.turn.ask, by: cur.turn.by, tools: cur.turn.tools, text: cur.msgText })
-      cur.turn.ended = true
+      const t = cur.turn
+      cur.reports.set(cur.msgId, { id: cur.msgId, at: o.timestamp, ask: t.ask, by: t.by, tools: t.tools, text: cur.msgText, files: [...t.files], shots: [...t.shots], checks: t.checks.slice() })
+      t.ended = true
+      // 같은 턴에서 보고가 또 나오면 그 뒤에 한 일만 붙도록 비운다
+      t.files = new Set(); t.shots = []; t.checks = []
+      notify(cur, '일을 마쳤어요', cur.msgText)
     }
     if (u) cur.ctx = { used: u.input_tokens + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), model: o.message.model, at: o.timestamp }
     for (const c of content || []) {
       if (c.type !== 'tool_use') continue
+      if (c.name === 'Bash') urls(cur, c.input.command || '', o.timestamp)
+      // 이 턴에서 한 일: 바꾼 파일 · 캡처 · 검사
+      if (cur.turn) {
+        const t = cur.turn
+        if (EDIT_TOOLS.includes(c.name)) t.files.add(c.input.file_path || c.input.notebook_path)
+        if (c.name === 'SendUserFile' && Array.isArray(c.input.files)) c.input.files.filter(f => IMG_RE.test(f)).forEach(f => t.shots.includes(f) || t.shots.push(f))
+        if (c.name === 'Read' && IMG_RE.test(c.input.file_path || '') && !t.shots.includes(c.input.file_path)) t.shots.push(c.input.file_path)
+        // 한 명령에 여러 검사가 있으면 결과(성공 · 실패)를 같이 쓴다
+        const ks = c.name === 'Bash' ? checkKinds(c.input.command || '').map(kind => ({ kind, cmd: c.input.command.split('\n')[0].slice(0, 200), ok: null })) : []
+        if (ks.length) { t.checks.push(...ks); cur.checkIds.set(c.id, ks) }
+      }
+      if (c.name === 'AskUserQuestion') notify(cur, '답을 기다려요', ((c.input.questions || [])[0] || {}).question || '')
       if (c.name === 'Agent') {
         cur.agents.set(c.id, { name: c.input.name || c.input.description || '이름 없음', type: c.input.subagent_type || 'general-purpose', model: c.input.model, status: 'running', at: o.timestamp })
       } else if (EDIT_TOOLS.includes(c.name)) {
@@ -177,7 +247,9 @@ function line(cur, text) {
         cur.files.delete(p)
         cur.files.set(p, f)
       } else if (c.name === 'Bash' && CODEX_RE.test(c.input.command || '')) {
-        cur.codexCalls.push(Date.parse(o.timestamp))
+        // 짝지을 단서: 시각, 작업 폴더 후보, 이어 말하기면 Codex 세션 ID
+        const cmd = c.input.command
+        cur.codexCalls.push({ t: Date.parse(o.timestamp), dirs: codexDirs(cmd, cur.cwd), id: (cmd.match(/\bresume\s+['"]?([0-9a-f-]{36})/) || [])[1] })
       } else if (c.name === 'Read' && IMG_RE.test(c.input.file_path || '')) {
         // Cursor 채팅에서는 보내지 않고 열어 보기만 한다. 3분 안에 연달아 본 것은 한 묶음으로
         const last = cur.outputs[cur.outputs.length - 1], t = Date.parse(o.timestamp)
@@ -200,6 +272,8 @@ function line(cur, text) {
     }
     if (Array.isArray(content)) {
       for (const c of content) {
+        const k = c.type === 'tool_result' && cur.checkIds.get(c.tool_use_id)
+        if (k) { k.forEach(x => { x.ok = !c.is_error }); cur.checkIds.delete(c.tool_use_id) }
         const a = c.type === 'tool_result' && cur.agents.get(c.tool_use_id)
         if (!a) continue
         const r = o.toolUseResult || {}
@@ -209,7 +283,9 @@ function line(cur, text) {
         a.at = o.timestamp
       }
     }
-    notices(cur, typeof content === 'string' ? content : (content || []).map(c => c.text || '').join('\n'), o.timestamp)
+    const said = typeof content === 'string' ? content : (content || []).map(c => c.text || (c.type === 'tool_result' ? (typeof c.content === 'string' ? c.content : (c.content || []).map(x => x.text || '').join('\n')) : '')).join('\n')
+    urls(cur, said, o.timestamp)
+    notices(cur, said, o.timestamp)
   } else if (o.type === 'attachment' && o.attachment) {
     // 이어서 시킨 일의 완료 알림은 첨부 줄로도 들어온다
     const p = o.attachment.prompt
@@ -220,13 +296,42 @@ function line(cur, text) {
   }
 }
 
+// 글 속 미리보기 주소를 모은다. 같은 주소는 마지막으로 나온 때로 옮긴다
+function urls(cur, text, at) {
+  if (!text.includes('http')) return
+  for (const m of text.matchAll(URL_RE)) {
+    let u
+    try { u = new URL(m[0].replace(/[.,;:!?'"]+$/, '')) } catch { continue }
+    if (!PREVIEW_HOST.test(u.hostname)) continue
+    const key = u.origin + u.pathname.replace(/\/$/, '') + u.search
+    cur.urls.delete(key)
+    cur.urls.set(key, { url: key, origin: u.origin, at })
+  }
+}
+
+// 서버가 켜져 있는지: 아무 응답이든 오면 켜짐. 주소마다 10초에 한 번만 묻는다
+const live = new Map()
+function checkLive(origins) {
+  for (const o of origins) {
+    const h = live.get(o)
+    if (h && (h.pending || Date.now() - h.at < 10000)) continue
+    live.set(o, { ok: h && h.ok, at: Date.now(), pending: true })
+    let fin = false
+    const done = ok => { if (fin) return; fin = true; live.set(o, { ok, at: Date.now() }); if (!h || h.ok !== ok) later() }
+    const req = require(o.startsWith('https') ? 'https' : 'http').request(o, { method: 'HEAD', timeout: 1500, rejectUnauthorized: false }, res => { res.resume(); done(true) })
+    req.on('timeout', () => req.destroy())
+    req.on('error', () => done(false))
+    req.end()
+  }
+}
+
 // 결과보고 앞에 붙일 「무엇에 대한 보고인지」. 내 요청이면 첫 줄, 에이전트 완료 알림이면 그 요약
 function startTurn(cur, said, at) {
   if (/^\s*<(local-command|command-)/.test(said)) return
   const sum = said.match(/<summary>([\s\S]*?)<\/summary>/)
   const by = said.includes('<task-notification>') ? 'agent' : 'me'
   const ask = by === 'agent' ? (sum ? sum[1] : '에이전트 작업 끝남') : said.replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, '').split('\n').map(x => x.trim()).find(Boolean) || ''
-  cur.turn = { ask: ask.slice(0, 200), by, tools: 0, at, ended: false }
+  cur.turn = { ask: ask.slice(0, 200), by, tools: 0, at, ended: false, files: new Set(), shots: [], checks: [] }
 }
 
 // 완료 알림은 에이전트 ID(task-id)로 맞춘다. 이어서 시킨 일이면 tool-use-id 가 SendMessage 호출이라 다르다
@@ -338,9 +443,18 @@ function sendCodex({ file, text, write }) {
   child.stdin.end(text)
 }
 
-// 이 세션이 시킨 Codex 일: 작업 폴더에 세션 ID 가 있거나, codex exec 호출 뒤 2분 안에 시작한 기록
+// codex 명령이 돌았을 폴더 후보(-C, cd). 같은 명령에서 정한 변수는 풀고, 못 푼 게 있으면 null(모름)
+function codexDirs(cmd, cwd) {
+  const vars = Object.fromEntries([...cmd.matchAll(/(?:^|[\s;&])([A-Za-z_]\w*)=(['"]?)([^\s'";&]+)\2/g)].map(m => [m[1], m[3]]))
+  const dirs = [...cmd.matchAll(/(?:-C|--cd|\bcd)\s+['"]?([^\s'"&;]+)/g)]
+    .map(m => m[1].replace(/\$\{?(\w+)\}?/g, (x, k) => vars[k] ?? x).replace(/^~(?=\/|$)/, os.homedir()))
+  if (dirs.some(d => d.includes('$'))) return null
+  return dirs.length ? dirs : [cwd]
+}
+
+// 이 세션이 시킨 Codex 일: 작업 폴더에 세션 ID 가 있거나, 이어 말하기로 고른 ID 이거나, 호출 뒤 2분 안에 같은 폴더에서 시작한 기록
 function codexRuns(cur) {
-  const first = Math.min(...cur.codexCalls, Date.now())
+  const first = Math.min(...cur.codexCalls.map(c => c.t), Date.now())
   const out = []
   for (let day = new Date(first - 864e5); day <= new Date(); day = new Date(+day + 864e5)) {
     const dir = path.join(CODEX, String(day.getFullYear()), String(day.getMonth() + 1).padStart(2, '0'), String(day.getDate()).padStart(2, '0'))
@@ -350,7 +464,7 @@ function codexRuns(cur) {
       if (!n.endsWith('.jsonl')) continue
       const p = path.join(dir, n)
       const run = readCodex(p, fs.statSync(p).mtimeMs)
-      const mine = (run.cwd || '').includes(cur.id) || cur.codexCalls.some(t => run.start >= t - 2000 && run.start <= t + 120000)
+      const mine = (run.cwd || '').includes(cur.id) || cur.codexCalls.some(c => c.id ? c.id === run.id : run.start >= c.t - 2000 && run.start <= c.t + 120000 && (!run.cwd || !c.dirs || c.dirs.includes(run.cwd)))
       if (mine) out.push(run)
     }
   }
@@ -371,6 +485,13 @@ function md(text) {
       .finally(() => mdPending.delete(text))
   }
   return null
+}
+
+// ponytail: 최근 40개 주소만 보이고 확인한다
+function urlList() {
+  const list = [...s.urls.values()].reverse().slice(0, 40)
+  checkLive(new Set(list.map(u => u.origin)))
+  return list.map(u => ({ ...u, live: live.has(u.origin) ? live.get(u.origin).ok : null }))
 }
 
 function render() {
@@ -398,8 +519,11 @@ function render() {
     usage,
     codex: codex.map(r => ({ ...r, turns: r.turns.map(t => t.who === 'codex' ? { ...t, html: md(t.text) } : t) })),
     codexLimits: codexLimits(),
-    reports: [...s.reports.values()].reverse().map(r => ({ ...r, html: md(r.text) })),
+    reports: [...s.reports.values()].reverse().map(r => ({ ...r, html: md(r.text), shots: (r.shots || []).map(p => ({ p, uri: panel.webview.asWebviewUri(vscode.Uri.file(p)).toString(), gone: !fs.existsSync(p) })) })),
     outputs: s.outputs.slice().reverse().map(g => ({ ...g, files: g.files.map(p => ({ p, uri: panel.webview.asWebviewUri(vscode.Uri.file(p)).toString(), gone: !fs.existsSync(p) })) })),
+    urls: urlList(),
+    local: local && local.data ? local.data(s, helpers) : undefined,
+    lanIp: lanIp(),
     agents: [...s.agents.values()].reverse(),
     files: [...s.files.entries()].reverse().map(([p, f]) => ({ p, ...f })),
   })
@@ -407,7 +531,8 @@ function render() {
 
 // 화면은 panel.html 에 있다. 열 때마다 새로 읽으므로 고치면 바로 반영된다
 function html() {
-  return fs.readFileSync(path.join(__dirname, 'panel.html'), 'utf8')
+  const page = fs.readFileSync(path.join(__dirname, 'panel.html'), 'utf8')
+  return local && local.html ? page.replace('</body>', () => local.html(helpers) + '</body>') : page
 }
 
 module.exports = { activate, deactivate }
