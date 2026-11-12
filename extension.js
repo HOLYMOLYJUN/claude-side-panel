@@ -44,8 +44,10 @@ let local = null
 try { local = require('./local/module.js') } catch {}
 const helpers = { uri: p => panel.webview.asWebviewUri(vscode.Uri.file(p)).toString(), refresh: () => later() }
 let s // 지금 보여 주는 세션
+let store // 진행판에서 새로 띄운 Codex 일을 세션별로 기억(창을 다시 불러와도 짝지어지게)
 
 function activate(ctx) {
+  store = ctx.globalState
   ctx.subscriptions.push(
     vscode.commands.registerCommand('claudeSidePanel.open', openPanel),
     vscode.window.tabGroups.onDidChangeTabs(onTabs),
@@ -77,6 +79,7 @@ function openPanel() {
   panel.webview.html = html()
   panel.webview.onDidReceiveMessage(m => {
     if (m.codexSend) sendCodex(m.codexSend)
+    if (m.codexNew && s) newCodex(s, m.codexNew.text, m.codexNew.model)
     if (m.url) vscode.env.openExternal(vscode.Uri.parse(m.url))
     if (m.copyImage) copyImage(m.copyImage)
     // 에이전트 자세히 보기: 열면 그 에이전트를 지켜보며 바뀔 때마다 다시 보낸다
@@ -130,7 +133,7 @@ async function select(label) {
   const id = path.basename(file, '.jsonl')
   const cur = s = {
     file, id, label, offset: 0, rest: Buffer.alloc(0), reading: null,
-    ctx: null, cwd: '', agents: new Map(), agentIds: new Map(), agentMetas: new Map(), agentFiles: new Set(), detail: null, files: new Map(), codexCalls: [], urls: new Map(), checkIds: new Map(), codexFiles: new Set(), outputs: [], reports: new Map(), turn: null, msgId: '', msgText: '',
+    ctx: null, cwd: '', agents: new Map(), agentIds: new Map(), agentMetas: new Map(), agentFiles: new Set(), detail: null, files: new Map(), codexCalls: ((store && store.get('codexNew', {})) || {})[id] || [], urls: new Map(), checkIds: new Map(), codexFiles: new Set(), outputs: [], reports: new Map(), turn: null, msgId: '', msgText: '',
     planFile: path.join(PLANS, id + '.md'),
     usageFile: path.join(USAGE, id + '.json'),
   }
@@ -412,7 +415,7 @@ function readAgent(a) {
       for (const c of content || []) {
         if (c.type === 'text' && c.text.trim()) { L.steps.push({ k: 'text', text: c.text.slice(0, STEP_MAX), at: o.timestamp }); L.final = c.text }
         if (c.type === 'tool_use') {
-          const st = { k: 'tool', name: c.name, brief: brief(c.name, c.input || {}), input: JSON.stringify(c.input, null, 1).slice(0, STEP_MAX), at: o.timestamp }
+          const st = { k: 'tool', name: c.name, brief: brief(c.name, c.input || {}), input: Object.entries(c.input || {}).map(([k, v]) => typeof v !== 'string' ? k + ': ' + JSON.stringify(v) : v.includes('\n') ? k + ':\n' + v : k + ': ' + v).join('\n').slice(0, STEP_MAX), at: o.timestamp }
           L.steps.push(st); L.byId.set(c.id, st); L.tools++
           if (c.name === 'SubagentHandback' && c.input && c.input.message) L.final = c.input.message // 최종 보고
         }
@@ -515,6 +518,41 @@ function codexLimits() {
   return v
 }
 
+// 진행판에서 새 Codex 일을 띄운다. 이 Claude 세션의 작업 폴더에서, 파일 수정 허용으로.
+// 시킨 말 뒤에 Claude 세션 정보(작업 폴더 · 고친 파일 · 최근 요청과 보고)를 붙여 어디를 볼지 알려 준다
+// Codex 가 고를 수 있게 보여 주는 모델(codex 가 받아 둔 목록에서 숨김 아닌 것, 우선순위 순)
+function codexModels() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(os.homedir(), '.codex/models_cache.json'), 'utf8')).models
+      .filter(m => m.visibility === 'list').sort((a, b) => a.priority - b.priority).map(m => ({ slug: m.slug, name: m.display_name || m.slug }))
+  } catch { return [] }
+}
+
+function newCodex(cur, text, model) {
+  if (!text || !text.trim()) return
+  const cwd = cur.cwd && fs.existsSync(cur.cwd) ? cur.cwd : os.homedir()
+  const files = [...cur.files.entries()].reverse().slice(0, 30).map(([p, f]) => '  - ' + p + ' (' + f.n + '번)')
+  const reps = [...cur.reports.values()].slice(-2).map((r, i) => '  ' + (i + 1) + ') 요청: ' + (r.ask || '').replace(/\s+/g, ' ').slice(0, 300) + '\n     Claude 보고: ' + (r.text || '').replace(/\s+/g, ' ').slice(0, 600))
+  const prompt = text.trim() + '\n\n---\n참고: 이 일은 Claude Code 세션 「' + cur.label + '」에서 하던 작업과 이어져 있어요. 아래를 보고 어디부터 볼지 정하세요.\n'
+    + '- 작업 폴더: ' + cwd + '\n'
+    + (files.length ? '- 이 세션에서 Claude 가 고친 파일(최근 순):\n' + files.join('\n') + '\n' : '')
+    + (reps.length ? '- 최근 요청과 Claude 보고:\n' + reps.join('\n') + '\n' : '')
+  const call = { t: Date.now(), dirs: [cwd] }
+  cur.codexCalls.push(call)
+  const remember = () => { const all = store.get('codexNew', {}); all[cur.id] = (all[cur.id] || []).filter(c => c !== call && c.t !== call.t).concat(call).slice(-50); store.update('codexNew', all) }
+  remember()
+  const child = require('child_process').spawn('zsh', ['-ic', 'codex exec --skip-git-repo-check -c sandbox_mode=workspace-write ${CX_MODEL:+--model=$CX_MODEL} -'], { cwd, env: { ...process.env, CX_MODEL: /^[\w.-]+$/.test(model || '') ? model : '' }, stdio: ['pipe', 'ignore', 'pipe'] })
+  let err = ''
+  child.stderr.on('data', b => {
+    err = (err + b).slice(-4000)
+    const id = !call.id && (err.match(/session id:\s*([0-9a-f-]{36})/i) || [])[1]
+    if (id) { call.id = id; remember(); if (s === cur) render() } // 시각 대신 Codex 세션 ID 로 정확히 짝짓기
+  })
+  child.on('close', code => { if (code) vscode.window.showErrorMessage('Codex 를 띄우지 못했어요: ' + err.trim().split('\n').pop()) })
+  child.stdin.end(prompt)
+  for (const ms of [2000, 6000]) setTimeout(() => s === cur && render(), ms) // 기록 파일이 생기면 목록에 뜨게
+}
+
 // 진행판에서 쓴 말을 그 Codex 세션에 이어 보낸다. 처음과 같은 작업 폴더에서 돌린다
 function sendCodex({ file, text, write }) {
   const run = codexCache.get(file) && codexCache.get(file).run
@@ -611,6 +649,7 @@ function render() {
     usage,
     codex: codex.map(r => ({ ...r, turns: r.turns.map(t => t.who === 'codex' ? { ...t, html: md(t.text) } : t) })),
     codexLimits: codexLimits(),
+    codexModels: codexModels(),
     reports: [...s.reports.values()].reverse().map(r => ({ ...r, html: md(r.text), shots: (r.shots || []).map(p => ({ p, uri: panel.webview.asWebviewUri(vscode.Uri.file(p)).toString(), gone: !fs.existsSync(p) })) })),
     outputs: s.outputs.slice().reverse().map(g => ({ ...g, files: g.files.map(p => ({ p, uri: panel.webview.asWebviewUri(vscode.Uri.file(p)).toString(), gone: !fs.existsSync(p) })) })),
     urls: urlList(),

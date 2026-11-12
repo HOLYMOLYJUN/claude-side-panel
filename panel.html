@@ -114,6 +114,10 @@
   .cxsend { margin-top: 12px; }
   .cxsend textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 6px 8px; font: 13px/1.5 var(--vscode-font-family); color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 4px; }
   .cxsend textarea:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+  .cxnew { display: flex; justify-content: flex-end; margin: 12px 0 0; }
+  .cxnew + .cxsend { margin: 8px 0 4px; }
+  .cxgo { flex: none; display: flex; align-items: center; gap: 8px; margin-left: 12px; }
+  .cxgo select { padding: 3px 6px; font: 12px var(--vscode-font-family); color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--line, var(--vscode-panel-border)); border-radius: 6px; }
   .cxsend .row { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
   .sw { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--vscode-descriptionForeground); cursor: pointer; }
   .send { all: unset; cursor: pointer; padding: 4px 12px; border-radius: 4px; font-weight: 500; background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
@@ -328,7 +332,7 @@
   #am .sb pre.bad { color: var(--vscode-charts-red); }
   #am .md { max-height: none; overflow: visible; } /* 창 안에서는 한 겹만 스크롤 */
   #am .tx { padding: 8px 12px; font-size: 12px; white-space: pre-wrap; word-break: break-word; color: var(--vscode-foreground); background: var(--surface); }
-  #am .live { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12px; color: var(--muted); }
+  #am .going { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12px; color: var(--muted); }
   @media (prefers-reduced-motion: reduce) { #am, #am .box { transition: none; } .pulse { animation: none; } }
 </style></head>
 <body>
@@ -490,7 +494,11 @@ function views() {
       return '<li class="cx exp' + (opened.has(key) ? ' open' : '') + '"><div class="exp-head" data-exp="' + esc(key) + '">' + head + '<span class="chev">›</span></div>'
         + '<div class="exp-body"><div><div class="cxbody">' + turns + form + '</div></div></div></li>'
     }).join('') + '</ul>'
-  const codex = codexLimitRows + (codexLimitRows ? '<h3>이 세션이 시킨 일</h3>' : '') + codexRuns
+  // 새 Codex 일: 이 Claude 세션의 작업 폴더에서 파일 수정 허용으로 띄운다
+  const codexNew = '<div class="cxnew"><button class="btn2" data-cxnew-toggle>' + (newCx ? '닫기' : '+ 새 Codex 일') + '</button></div>'
+    + (newCx ? '<div class="cxsend"><textarea data-draft="__new" rows="3" placeholder="Codex 에 시킬 일을 쓰세요. Cmd+Enter 로 보내요">' + esc(drafts.get('__new') || '') + '</textarea>'
+      + '<div class="row"><span class="memo">작업 폴더 · 고친 파일 · 최근 요청과 보고를 함께 보내요. 파일 수정 허용</span><span class="cxgo">' + ((d.codexModels || []).length ? '<select data-cxmodel title="모델"><option value="">기본 모델</option>' + d.codexModels.map(m => '<option value="' + esc(m.slug) + '"' + (m.slug === cxModel ? ' selected' : '') + '>' + esc(m.name) + '</option>').join('') + '</select>' : '') + '<button class="send" data-cxnew>보내기</button></span></div></div>' : '')
+  const codex = codexNew + codexLimitRows + (codexLimitRows ? '<h3>이 세션이 시킨 일</h3>' : '') + codexRuns
 
   const IMG = /\.(png|jpe?g|gif|webp|svg|avif)$/i
   const groups = d.outputs || []
@@ -566,14 +574,18 @@ function views() {
 const opened = new Set()
 // 다시 그려도 쓰던 글과 스위치가 남도록 따로 들고 있는다
 const drafts = new Map(), writes = new Set()
+let newCx = false // 새 Codex 일 입력 칸이 열려 있는지
+let cxModel = '' // 새 Codex 일 모델(빈 값은 Codex 기본)
 document.addEventListener('input', e => {
   if (e.target.dataset.draft) drafts.set(e.target.dataset.draft, e.target.value)
   if ('allrep' in e.target.dataset) { showAll = e.target.checked; save(); draw() }
+  if ('cxmodel' in e.target.dataset) cxModel = e.target.value
   if (e.target.dataset.write) e.target.checked ? writes.add(e.target.dataset.write) : writes.delete(e.target.dataset.write)
 })
 function sendCx(file) {
   const text = (drafts.get(file) || '').trim()
   if (!text) return
+  if (file === '__new') { vscode.postMessage({ codexNew: { text, model: cxModel } }); drafts.delete(file); newCx = false; return draw() }
   vscode.postMessage({ codexSend: { file, text, write: writes.has(file) } })
   drafts.delete(file)
   draw()
@@ -783,6 +795,8 @@ document.addEventListener('click', e => {
   }
   const sb = e.target.closest('[data-send]')
   if (sb && !sb.disabled) sendCx(sb.dataset.send)
+  if (e.target.closest('[data-cxnew]')) sendCx('__new')
+  if (e.target.closest('[data-cxnew-toggle]')) { newCx = !newCx; draw(); if (newCx) setTimeout(() => { const t = document.querySelector('[data-draft="__new"]'); t && t.focus() }) }
   const u = e.target.closest('[data-url]')
   if (u) vscode.postMessage({ url: u.dataset.url })
   const pk = e.target.closest('[data-pick]')
@@ -886,10 +900,10 @@ function drawAm() {
       + '<div class="sb"><div class="k">입력</div><pre>' + esc(x.input || '') + '</pre>' + (x.result != null ? '<div class="k">' + (x.err ? '오류' : '결과') + '</div><pre' + (x.err ? ' class="bad"' : '') + '>' + esc(x.result || '(비어 있음)') + '</pre>' : '<div class="k">결과 기다리는 중</div>') + '</div></div>'
   }).join('')
   bd.innerHTML = '<h3>받은 지시</h3><div class="prompt' + (amPrompt ? ' full' : '') + '">' + esc(a.prompt || '') + '</div><button class="more" data-am="prompt">' + (amPrompt ? '접기' : '전체 보기') + '</button>'
+    + (a.final || a.finalText ? '<h3>최종 보고</h3><div class="md">' + (a.final || '<div style="white-space:pre-wrap">' + esc(a.finalText) + '</div>') + '</div>' : '')
     + '<h3>한 일 · ' + a.total + '개</h3>' + (a.steps.length < a.total ? '<button class="more" data-am="all" style="margin:0 0 8px">앞부분 ' + (a.total - a.steps.length) + '개 더 보기</button>' : '')
     + '<div class="steps">' + (steps || '<div class="st"><div class="tx muted">아직 한 일이 없어요.</div></div>') + '</div>'
-    + (st === 'running' ? '<div class="live"><i class="pulse"></i>일하는 중이에요. 새 동작이 아래에 이어 붙어요.</div>' : '')
-    + (a.final || a.finalText ? '<h3>최종 보고</h3><div class="md">' + (a.final || '<div style="white-space:pre-wrap">' + esc(a.finalText) + '</div>') + '</div>' : '')
+    + (st === 'running' ? '<div class="going"><i class="pulse"></i>일하는 중이에요. 새 동작이 아래에 이어 붙어요.</div>' : '')
   // 다시 그려도 보던 자리를 지킨다. 도는 중이고 맨 아래를 보고 있었으면 새 동작을 따라간다
   bd.scrollTop = atEnd && st === 'running' ? bd.scrollHeight : keepTop
 }
