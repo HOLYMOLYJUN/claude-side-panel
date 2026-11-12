@@ -1,6 +1,6 @@
 {
   "name": "side-panel",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Claude 진행판 확장의 짝 플러그인: 진행판 규칙을 세션에 알리고, 턴마다 컨텍스트 항목과 사용 한도를 기록한다.",
   "author": { "name": "HOLYMOLYJUN", "url": "https://github.com/HOLYMOLYJUN" },
   "repository": "https://github.com/HOLYMOLYJUN/claude-side-panel",
