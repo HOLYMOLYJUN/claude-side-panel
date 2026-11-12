@@ -73,11 +73,18 @@ function openPanel() {
     { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
     // 보낸 이미지가 scratchpad 등 아무 데나 있어서 로컬 파일 전체를 읽게 둔다
     { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.file('/')] })
+  panel.iconPath = vscode.Uri.file(path.join(__dirname, 'icon.svg')) // 탭 아이콘
   panel.webview.html = html()
   panel.webview.onDidReceiveMessage(m => {
     if (m.codexSend) sendCodex(m.codexSend)
     if (m.url) vscode.env.openExternal(vscode.Uri.parse(m.url))
     if (m.copyImage) copyImage(m.copyImage)
+    // 에이전트 자세히 보기: 열면 그 에이전트를 지켜보며 바뀔 때마다 다시 보낸다
+    if ('agentDetail' in m && s) {
+      s.detail = m.agentDetail
+      const a = m.agentDetail && s.agents.get(m.agentDetail)
+      if (a) postDetail(a, m.all)
+    }
     if (m.local && local && local.onMessage) local.onMessage(m.local, helpers)
     if (m.open) vscode.commands.executeCommand('vscode.open', vscode.Uri.file(m.open), { viewColumn: vscode.ViewColumn.One, preview: true })
     // 화면이 (다시) 뜨면 지금 자료를 다시 보낸다
@@ -123,7 +130,7 @@ async function select(label) {
   const id = path.basename(file, '.jsonl')
   const cur = s = {
     file, id, label, offset: 0, rest: Buffer.alloc(0), reading: null,
-    ctx: null, cwd: '', agents: new Map(), agentIds: new Map(), files: new Map(), codexCalls: [], urls: new Map(), checkIds: new Map(), codexFiles: new Set(), outputs: [], reports: new Map(), turn: null, msgId: '', msgText: '',
+    ctx: null, cwd: '', agents: new Map(), agentIds: new Map(), agentMetas: new Map(), agentFiles: new Set(), detail: null, files: new Map(), codexCalls: [], urls: new Map(), checkIds: new Map(), codexFiles: new Set(), outputs: [], reports: new Map(), turn: null, msgId: '', msgText: '',
     planFile: path.join(PLANS, id + '.md'),
     usageFile: path.join(USAGE, id + '.json'),
   }
@@ -146,6 +153,7 @@ function stop() {
   fs.unwatchFile(s.usageFile)
   fs.unwatchFile(LIMITS)
   for (const f of s.codexFiles) fs.unwatchFile(f)
+  for (const f of s.agentFiles) fs.unwatchFile(f)
   clearInterval(s.liveTimer)
   s = undefined
 }
@@ -238,7 +246,7 @@ function line(cur, text) {
       }
       if (c.name === 'AskUserQuestion') notify(cur, '답을 기다려요', ((c.input.questions || [])[0] || {}).question || '')
       if (c.name === 'Agent') {
-        cur.agents.set(c.id, { name: c.input.name || c.input.description || '이름 없음', type: c.input.subagent_type || 'general-purpose', model: c.input.model, status: 'running', at: o.timestamp })
+        cur.agents.set(c.id, { id: c.id, name: c.input.name || c.input.description || '이름 없음', type: c.input.subagent_type || 'general-purpose', model: c.input.model, status: 'running', at: o.timestamp, start: o.timestamp })
       } else if (EDIT_TOOLS.includes(c.name)) {
         const p = c.input.file_path || c.input.notebook_path
         const f = cur.files.get(p) || { n: 0 }
@@ -340,6 +348,87 @@ function notices(cur, text, at) {
     const a = cur.agentIds.get(m[1]) || cur.agents.get(m[2])
     if (a) { a.status = m[3] === 'completed' ? 'done' : m[3]; a.at = at }
   }
+}
+
+// 하위 에이전트 기록: <세션 폴더>/subagents/agent-<번호>.jsonl. 옆 meta.json 의 toolUseId 로 Agent 호출과 짝짓는다
+const STEP_MAX = 3000
+function brief(name, i) {
+  const b = p => (p || '').split('/').pop()
+  if (name === 'Read') return '읽기 · ' + b(i.file_path)
+  if (EDIT_TOOLS.includes(name)) return '고치기 · ' + b(i.file_path || i.notebook_path)
+  if (name === 'Bash') return '명령 · ' + (i.description || (i.command || '').split('\n')[0])
+  if (name === 'Grep' || name === 'Glob') return '찾기 · ' + (i.pattern || '')
+  if (name === 'WebSearch') return '웹 검색 · ' + (i.query || '')
+  if (name === 'WebFetch') return '웹 읽기 · ' + (i.url || '')
+  if (name === 'Agent') return '에이전트 · ' + (i.description || '')
+  if (name === 'SubagentHandback') return '보고 · 최종 보고를 넘김'
+  return name.replace(/^mcp__([^_]+)__/, '$1 · ')
+}
+function linkAgents(cur) {
+  const dir = path.join(path.dirname(cur.file), cur.id, 'subagents')
+  let names
+  try { names = fs.readdirSync(dir) } catch { return }
+  for (const n of names) {
+    if (!n.endsWith('.meta.json') || cur.agentMetas.has(n)) continue
+    try { cur.agentMetas.set(n, JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8')).toolUseId) } catch {}
+  }
+  for (const [n, tid] of cur.agentMetas) {
+    const a = cur.agents.get(tid)
+    if (!a || a.log) continue
+    a.log = { file: path.join(dir, n.replace('.meta.json', '.jsonl')), offset: 0, rest: '', prompt: '', steps: [], tools: 0, final: '', byId: new Map() }
+    readAgent(a)
+    cur.agentFiles.add(a.log.file)
+    fs.watchFile(a.log.file, { interval: 1000 }, () => { if (s === cur && readAgent(a)) { render(); if (cur.detail === a.id) postDetail(a) } })
+  }
+}
+// 새로 붙은 줄만 읽는다. 바뀐 게 있으면 true
+function readAgent(a) {
+  const L = a.log
+  let buf
+  try {
+    const st = fs.statSync(L.file)
+    if (st.size <= L.offset) return false
+    const fd = fs.openSync(L.file, 'r')
+    buf = Buffer.alloc(st.size - L.offset)
+    fs.readSync(fd, buf, 0, buf.length, L.offset)
+    fs.closeSync(fd)
+    L.offset = st.size
+  } catch { return false }
+  const lines = (L.rest + buf.toString('utf8')).split('\n')
+  L.rest = lines.pop()
+  const txt = c => typeof c === 'string' ? c : (c || []).map(x => x.text || '').join('\n')
+  for (const line of lines) {
+    let o
+    try { o = JSON.parse(line) } catch { continue }
+    const content = o.message && o.message.content
+    if (o.type === 'user') {
+      if (!L.prompt && typeof content === 'string') L.prompt = content
+      for (const c of Array.isArray(content) ? content : []) {
+        if (c.type === 'text' && !L.prompt) L.prompt = c.text
+        const st = c.type === 'tool_result' && L.byId.get(c.tool_use_id)
+        if (st) { st.result = txt(c.content).slice(0, STEP_MAX); st.err = !!c.is_error }
+      }
+    } else if (o.type === 'assistant') {
+      for (const c of content || []) {
+        if (c.type === 'text' && c.text.trim()) { L.steps.push({ k: 'text', text: c.text.slice(0, STEP_MAX), at: o.timestamp }); L.final = c.text }
+        if (c.type === 'tool_use') {
+          const st = { k: 'tool', name: c.name, brief: brief(c.name, c.input || {}), input: JSON.stringify(c.input, null, 1).slice(0, STEP_MAX), at: o.timestamp }
+          L.steps.push(st); L.byId.set(c.id, st); L.tools++
+          if (c.name === 'SubagentHandback' && c.input && c.input.message) L.final = c.input.message // 최종 보고
+        }
+      }
+    }
+  }
+  return true
+}
+// 자세히 보기 창에 보낼 것. 길면 최근 300개만, 「앞부분 더 보기」면 전부
+function postDetail(a, all) {
+  const L = a.log || { prompt: '', steps: [], tools: 0, final: '' }
+  if (all) a.detailAll = true
+  a.postedStatus = a.status
+  const steps = a.detailAll ? L.steps : L.steps.slice(-300)
+  post({ agentDetail: { id: a.id, name: a.name, type: a.type, model: a.model, status: a.status, start: a.start, at: a.at, tools: L.tools, prompt: L.prompt, total: L.steps.length, steps: steps.map(({ k, name, brief, input, result, err, text, at }) => ({ k, name, brief, input, result, err, text, at })), final: a.status === 'done' && L.final ? md(L.final) : '', finalText: a.status === 'done' ? L.final : '', found: !!a.log } })
+  a.finalPending = a.status === 'done' && !!L.final && !mdCache.get(L.final) // 마크다운 변환이 끝나면 다시 보낸다
 }
 
 // Codex 기록 하나를 읽는다. 파일이 바뀌지 않았으면 지난번 결과를 쓴다.
@@ -495,6 +584,9 @@ function urlList() {
 }
 
 function render() {
+  linkAgents(s)
+  const open = s.detail && s.agents.get(s.detail)
+  if (open && (open.postedStatus !== open.status || (open.finalPending && mdCache.get(open.log.final)))) postDetail(open) // 끝남 · 실패로 바뀌면 창도 바꾼다
   const codex = codexRuns(s)
   for (const r of codex) {
     if (s.codexFiles.has(r.file)) continue
@@ -524,7 +616,10 @@ function render() {
     urls: urlList(),
     local: local && local.data ? local.data(s, helpers) : undefined,
     lanIp: lanIp(),
-    agents: [...s.agents.values()].reverse(),
+    agents: [...s.agents.values()].reverse().map(({ log, ...a }) => {
+      const last = log && log.steps[log.steps.length - 1]
+      return { ...a, tools: log ? log.tools : 0, now: last ? (last.k === 'tool' ? last.brief : last.text.split('\n').find(x => x.trim()) || '') : '' }
+    }),
     files: [...s.files.entries()].reverse().map(([p, f]) => ({ p, ...f })),
   })
 }

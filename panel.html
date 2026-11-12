@@ -40,7 +40,7 @@
   nav button.on { color: var(--vscode-foreground); }
   /* 탭 밑줄은 하나만 두고 고른 탭 아래로 미끄러뜨린다 */
   #ind { position: absolute; left: 0; bottom: -1px; height: 2px; width: 0; border-radius: 1px; background: var(--vscode-focusBorder); transition: transform .25s cubic-bezier(.2, .8, .2, 1), width .25s cubic-bezier(.2, .8, .2, 1), opacity .15s; }
-  @media (prefers-reduced-motion: reduce) { #ind, nav button { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { #ind, nav button, nav button .lb, nav button .n { transition: none; } }
   nav .n { margin-left: 6px; display: inline-block; padding: 2px 7px; line-height: 14px; border-radius: 10px; font-size: 11px; vertical-align: 1px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
   main { padding-top: 16px; }
   .muted { color: var(--vscode-descriptionForeground); }
@@ -202,7 +202,9 @@
   nav { border-bottom-color: var(--line); }
   #colbtn { border-color: var(--line); }
   /* 탭: 아이콘 + 이름. 좁으면 고른 탭만 이름을 보인다 */
-  nav button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px 9px; }
+  nav button { display: inline-flex; align-items: center; gap: 0; padding: 6px 8px 9px; }
+  /* 이름 · 숫자는 너비와 투명도로 펼치고 접는다(좁은 폭에서 탭을 바꿀 때 툭 튀지 않게) */
+  nav button .lb, nav button .n { max-width: 120px; margin-left: 6px; overflow: hidden; white-space: nowrap; transition: max-width .26s cubic-bezier(.2, .8, .2, 1), margin-left .26s cubic-bezier(.2, .8, .2, 1), opacity .2s ease; }
   nav button .ti { display: flex; opacity: .8; }
   nav button.on .ti { opacity: 1; color: var(--accent); }
   nav .n { margin-left: 0; padding: 1px 6px; font-weight: 500; background: var(--surface-2); color: var(--muted); }
@@ -210,8 +212,8 @@
   /* 좁으면 안 고른 탭은 아이콘만. 숫자 대신, 확인할 게 있는 탭(안 읽은 보고 · 실행 중)에만 점 */
   @media (max-width: 959px) {
     #tabs { gap: 0; }
-    #tabs button:not(.on) .lb, #tabs button:not(.on) .n:not(.alert) { display: none; }
-    #tabs button:not(.on) .n.alert { position: absolute; top: 4px; right: 3px; width: 6px; height: 6px; padding: 0; font-size: 0; border-radius: 3px; background: var(--run); }
+    #tabs button:not(.on) .lb, #tabs button:not(.on) .n:not(.alert) { max-width: 0; margin-left: 0; opacity: 0; }
+    #tabs button:not(.on) .n.alert { margin-left: 0; transition: none; position: absolute; top: 4px; right: 3px; width: 6px; height: 6px; padding: 0; font-size: 0; border-radius: 3px; background: var(--run); }
     #tabs button { position: relative; }
   }
   main { padding-top: 18px; }
@@ -286,10 +288,53 @@
   .tb .shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .tb .badge { line-height: 18px; }
   .rep .memo .badge { margin-left: 6px; padding: 0 6px; line-height: 16px; vertical-align: 1px; }
+
+  /* 에이전트: 줄마다 지금 하는 일, 누르면 가운데 큰 창에서 자세히 */
+  li.ag { cursor: pointer; align-items: flex-start; }
+  li.ag:hover .grow > b { text-decoration: underline; }
+  li.ag .grow > b { font-weight: 500; }
+  li.ag .now { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 12px; color: var(--vscode-foreground); overflow: hidden; white-space: nowrap; }
+  li.ag .now span { overflow: hidden; text-overflow: ellipsis; }
+  .pulse { flex: none; width: 6px; height: 6px; border-radius: 3px; background: var(--vscode-progressBar-background); animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  li.ag .chev { flex: none; color: var(--muted); }
+  #am { position: fixed; inset: 0; z-index: 15; display: flex; align-items: center; justify-content: center; padding: 24px 16px; box-sizing: border-box; background: rgba(0, 0, 0, .55); opacity: 0; pointer-events: none; transition: opacity .18s; }
+  #am.on { opacity: 1; pointer-events: auto; }
+  #am .box { display: flex; flex-direction: column; width: 100%; max-width: 880px; height: 100%; max-height: 860px; background: var(--vscode-sideBar-background, var(--vscode-editor-background)); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 16px 48px rgba(0, 0, 0, .45); transform: translateY(8px) scale(.99); transition: transform .22s cubic-bezier(.2, .8, .2, 1); overflow: hidden; }
+  #am.on .box { transform: none; }
+  #am .hd { display: flex; align-items: flex-start; gap: 12px; padding: 16px 20px 12px; border-bottom: 1px solid var(--line); }
+  #am .hd h2 { margin: 0; font-size: 15px; }
+  #am .hd .x { all: unset; flex: none; width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: var(--muted); cursor: pointer; }
+  #am .hd .x:hover { color: var(--vscode-foreground); background: var(--vscode-list-hoverBackground); }
+  #am .bd { flex: 1; overflow: auto; padding: 4px 20px 20px; scrollbar-width: none; }
+  #am .bd::-webkit-scrollbar { display: none; }
+  #am h3 { margin: 16px 0 8px; }
+  #am .prompt { white-space: pre-wrap; word-break: break-word; padding: 10px 12px; border-radius: 6px; background: var(--surface); font-size: 12px; max-height: 6.4em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
+  #am .prompt.full { max-height: none; -webkit-mask-image: none; mask-image: none; }
+  #am .more { all: unset; margin-top: 6px; font-size: 12px; color: var(--vscode-textLink-foreground); cursor: pointer; }
+  #am .steps { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 6px; }
+  #am .st + .st { border-top: 1px solid var(--line); }
+  #am .sh { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 12px; cursor: pointer; font-size: 12px; }
+  #am .sh:hover { background: var(--vscode-list-hoverBackground); }
+  #am .tn { flex: none; min-width: 52px; padding: 1px 6px; border-radius: 4px; background: var(--surface-2); color: var(--muted); font: 11px var(--vscode-editor-font-family); text-align: center; }
+  #am .st.err .tn { color: var(--vscode-charts-red); }
+  #am .br { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #am .tm { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  #am .sb { display: none; padding: 0 12px 10px; }
+  #am .st.open .sb { display: block; }
+  #am .st.open .chev { transform: rotate(90deg); }
+  #am .sb .k { margin: 6px 0 4px; font-size: 11px; color: var(--muted); }
+  #am .sb pre { margin: 0; max-height: 280px; overflow: auto; padding: 8px 10px; border-radius: 4px; background: var(--vscode-textCodeBlock-background); font: 11px/1.5 var(--vscode-editor-font-family); white-space: pre-wrap; word-break: break-word; }
+  #am .sb pre.bad { color: var(--vscode-charts-red); }
+  #am .md { max-height: none; overflow: visible; } /* 창 안에서는 한 겹만 스크롤 */
+  #am .tx { padding: 8px 12px; font-size: 12px; white-space: pre-wrap; word-break: break-word; color: var(--vscode-foreground); background: var(--surface); }
+  #am .live { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 12px; color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { #am, #am .box { transition: none; } .pulse { animation: none; } }
 </style></head>
 <body>
 <header><div class="title" id="title">Claude 진행판</div><nav><div id="tabs"></div><button id="colbtn" title="탭 고르기" aria-label="탭 고르기" aria-haspopup="menu"><svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor"><path d="M32,80a8,8,0,0,1,8-8H77.17a28,28,0,0,1,53.66,0H216a8,8,0,0,1,0,16H130.83a28,28,0,0,1-53.66,0H40A8,8,0,0,1,32,80Zm184,88H194.83a28,28,0,0,0-53.66,0H40a8,8,0,0,0,0,16H141.17a28,28,0,0,0,53.66,0H216a8,8,0,0,0,0-16Z"/></svg></button><div id="tabmenu" role="menu"><div class="mh" id="mh"></div><ul id="tablist"></ul><div class="mf"><button data-reset>기본값으로</button></div></div><span id="ind"></span></nav></header>
 <div id="thumbbar"></div><div id="fade"></div><main id="main"><p class="muted">불러오는 중이에요.</p></main>
+<div id="am" role="dialog" aria-label="에이전트 자세히"><div class="box"><div class="hd"></div><div class="bd"></div></div></div>
 <div id="lb" role="dialog" aria-label="크게 보기"><button class="x" data-lb="close" aria-label="닫기">✕</button><button class="prev" data-lb="prev" aria-label="이전">‹</button><img alt=""><div class="cmp"></div><div class="meta"></div><button class="next" data-lb="next" aria-label="다음">›</button></div>
 <script>
 const vscode = acquireVsCodeApi()
@@ -409,7 +454,8 @@ function views() {
       + (u ? '' : '<p class="muted">항목별 비율과 사용 한도는 이 세션에서 답이 한 번 끝나면 보여요.</p>')
 
   const agents = !d.agents.length ? empty('agents', '이 세션에서 띄운 에이전트가 없어요.')
-    : '<ul>' + d.agents.map(a => '<li><span class="grow">' + esc(a.name) + '<span class="memo">' + esc(a.type) + (a.model ? ' · ' + esc(a.model) : '') + ' · ' + ago(a.at) + '</span></span><span><span class="badge ' + a.status + '">' + (STATUS[a.status] || esc(a.status)) + '</span></span></li>').join('') + '</ul>'
+    : '<ul>' + d.agents.map(a => '<li class="ag" data-agent="' + esc(a.id || '') + '"><span class="grow"><b>' + esc(a.name) + '</b><span class="memo">' + esc(a.type) + (a.model ? ' · ' + esc(a.model) : '') + (a.tools ? ' · 도구 ' + a.tools + '번' : '') + ' · ' + ago(a.at) + '</span>'
+      + (a.status === 'running' && a.now ? '<span class="now"><i class="pulse"></i><span>' + esc(a.now) + '</span></span>' : '') + '</span><span><span class="badge ' + a.status + '">' + (STATUS[a.status] || esc(a.status)) + '</span></span><span class="chev">›</span></li>').join('') + '</ul>'
 
   const rel = p => d.cwd && p.startsWith(d.cwd + '/') ? p.slice(d.cwd.length + 1) : p.replace(/^\/Users\/[^/]+/, '~')
   const files = !d.files.length ? empty('files', '이 세션에서 바꾼 파일이 없어요.')
@@ -560,6 +606,14 @@ function placeInd() {
   ind.style.transform = 'translateX(' + (on.offsetLeft - tabs.scrollLeft) + 'px)'
 }
 document.getElementById('tabs').addEventListener('scroll', placeInd)
+// 이름 너비가 바뀌는 0.3초 동안 밑줄 위치를 매 장면 다시 잰다
+let indUntil = 0
+function followInd() {
+  const go = !indUntil
+  indUntil = performance.now() + 320
+  placeInd()
+  if (go) requestAnimationFrame(function f(t) { placeInd(); if (t < indUntil) requestAnimationFrame(f); else indUntil = 0 })
+}
 
 const TABS = [['plan', '진행판'], ['rep', '결과보고'], ['ctx', '컨텍스트'], ['agents', '에이전트'], ['codex', '코덱스'], ['out', '결과물'], ['urls', '주소'], ['files', '바뀐 파일']]
 // 내가 정한 순서대로. 순서에 없는 새 탭은 뒤에 붙는다
@@ -673,7 +727,12 @@ function draw() {
   const v = views()
   document.getElementById('title').textContent = d.label
   // 끄는 중에는 탭 줄을 다시 그리지 않는다
-  if (!drag) document.getElementById('tabs').innerHTML = visible.map(([k, n]) => '<button data-tab="' + k + '" data-key="' + k + '" title="' + n + '" class="' + (k === tab ? 'on' : '') + '"><span class="ti">' + SVG(k, 16, true) + '</span><span class="lb">' + n + '</span>' + (v.counts[k] ? '<span class="n' + (['rep', 'agents', 'codex'].includes(k) ? ' alert' : '') + '">' + v.counts[k] + '</span>' : '') + '</button>').join('')
+  if (!drag) {
+    const html = visible.map(([k, n]) => '<button data-tab="' + k + '" data-key="' + k + '" title="' + n + '"><span class="ti">' + SVG(k, 16, true) + '</span><span class="lb">' + n + '</span>' + (v.counts[k] ? '<span class="n' + (['rep', 'agents', 'codex'].includes(k) ? ' alert' : '') + '">' + v.counts[k] + '</span>' : '') + '</button>').join('')
+    const box = document.getElementById('tabs')
+    if (box.dataset.html !== html) { box.innerHTML = html; box.dataset.html = html }
+    box.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab))
+  }
   const f = document.activeElement, keep = f && f.dataset && f.dataset.draft ? [f.dataset.draft, f.selectionStart, f.selectionEnd] : null
   document.getElementById('main').innerHTML = v[tab]
   if (keep) {
@@ -682,7 +741,7 @@ function draw() {
   }
   const on = document.querySelector('#tabs .on')
   on.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  placeInd()
+  followInd()
   edges()
 }
 
@@ -804,8 +863,54 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'ArrowRight') step(1)
   else if (e.key === 'ArrowLeft') step(-1)
 })
+
+// 에이전트 자세히 보기: 가운데 큰 창. 여는 동안 확장이 바뀔 때마다 다시 보낸다
+const am = document.getElementById('am')
+let amData = null, amId = null, amPrompt = false
+const amOpen = new Set()
+const hm = t => t ? new Date(t).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : ''
+function openAm(id) { amId = id; amData = null; am.querySelector('.bd').scrollTop = 0; amOpen.clear(); amPrompt = false; drawAm(); am.classList.add('on'); vscode.postMessage({ agentDetail: id }) }
+function closeAm() { am.classList.remove('on'); amId = null; vscode.postMessage({ agentDetail: null }) }
+function drawAm() {
+  const a = amData && amData.id === amId ? amData : null
+  const row = (d && d.agents || []).find(x => x.id === amId) || {}
+  const st = (a && a.status) || row.status
+  am.querySelector('.hd').innerHTML = '<div class="grow"><h2>' + esc((a || row).name || '') + '</h2><span class="memo">' + esc((a || row).type || '') + ((a || row).model ? ' · ' + esc((a || row).model) : '') + (a ? ' · 도구 ' + a.tools + '번' : '') + (a && a.start ? ' · ' + hm(a.start) + ' 시작' : '') + '</span></div><span class="badge ' + st + '">' + (STATUS[st] || esc(st || '')) + '</span><button class="x" data-am="close" aria-label="닫기">✕</button>'
+  const bd = am.querySelector('.bd'), atEnd = bd.scrollHeight - bd.scrollTop - bd.clientHeight < 40, keepTop = bd.scrollTop
+  if (!a) { bd.innerHTML = '<p class="muted">기록을 불러오는 중이에요.</p>'; return }
+  if (!a.found) { bd.innerHTML = '<p class="muted">이 에이전트의 기록 파일을 찾지 못했어요. 오래된 세션이거나 아직 시작 전일 수 있어요.</p>'; return }
+  const steps = a.steps.map((x, i) => {
+    const n = a.total - a.steps.length + i
+    if (x.k === 'text') return '<div class="st"><div class="tx">' + esc(x.text) + '</div></div>'
+    return '<div class="st' + (x.err ? ' err' : '') + (amOpen.has(n) ? ' open' : '') + '"><button class="sh" data-st="' + n + '"><span class="tn" title="' + esc(x.name) + '">' + esc(x.brief.includes(' · ') ? x.brief.split(' · ')[0] : x.name.replace(/^mcp__.*__/, '')) + '</span><span class="br">' + esc(x.brief.includes(' · ') ? x.brief.slice(x.brief.indexOf(' · ') + 3) : '') + '</span><span class="tm">' + hm(x.at) + '</span><span class="chev">›</span></button>'
+      + '<div class="sb"><div class="k">입력</div><pre>' + esc(x.input || '') + '</pre>' + (x.result != null ? '<div class="k">' + (x.err ? '오류' : '결과') + '</div><pre' + (x.err ? ' class="bad"' : '') + '>' + esc(x.result || '(비어 있음)') + '</pre>' : '<div class="k">결과 기다리는 중</div>') + '</div></div>'
+  }).join('')
+  bd.innerHTML = '<h3>받은 지시</h3><div class="prompt' + (amPrompt ? ' full' : '') + '">' + esc(a.prompt || '') + '</div><button class="more" data-am="prompt">' + (amPrompt ? '접기' : '전체 보기') + '</button>'
+    + '<h3>한 일 · ' + a.total + '개</h3>' + (a.steps.length < a.total ? '<button class="more" data-am="all" style="margin:0 0 8px">앞부분 ' + (a.total - a.steps.length) + '개 더 보기</button>' : '')
+    + '<div class="steps">' + (steps || '<div class="st"><div class="tx muted">아직 한 일이 없어요.</div></div>') + '</div>'
+    + (st === 'running' ? '<div class="live"><i class="pulse"></i>일하는 중이에요. 새 동작이 아래에 이어 붙어요.</div>' : '')
+    + (a.final || a.finalText ? '<h3>최종 보고</h3><div class="md">' + (a.final || '<div style="white-space:pre-wrap">' + esc(a.finalText) + '</div>') + '</div>' : '')
+  // 다시 그려도 보던 자리를 지킨다. 도는 중이고 맨 아래를 보고 있었으면 새 동작을 따라간다
+  bd.scrollTop = atEnd && st === 'running' ? bd.scrollHeight : keepTop
+}
+document.addEventListener('click', e => {
+  const g = e.target.closest('[data-agent]')
+  if (g && g.dataset.agent) return openAm(g.dataset.agent)
+  const b = e.target.closest('[data-am]')
+  if (b) {
+    if (b.dataset.am === 'close') closeAm()
+    if (b.dataset.am === 'prompt') { amPrompt = !amPrompt; drawAm() }
+    if (b.dataset.am === 'all') vscode.postMessage({ agentDetail: amId, all: true })
+    return
+  }
+  const t = e.target.closest('#am [data-st]')
+  if (t) { const n = +t.dataset.st; amOpen.has(n) ? amOpen.delete(n) : amOpen.add(n); t.parentElement.classList.toggle('open') }
+  else if (e.target === am) closeAm()
+})
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && am.classList.contains('on')) closeAm() })
 window.addEventListener('message', e => {
   const m = e.data
+  if (m.agentDetail) { amData = m.agentDetail; if (am.classList.contains('on')) drawAm(); return }
   if ('copied' in m) {
     const a = lb.querySelector('[data-copy]')
     if (a && a.dataset.copy === m.copied) { a.textContent = m.ok ? '복사했어요' : '복사하지 못했어요'; setTimeout(() => { a.textContent = '복사' }, 1500) }
@@ -814,7 +919,7 @@ window.addEventListener('message', e => {
   if (m.loading || m.empty) {
     d = null
     document.getElementById('title').textContent = m.loading || 'Claude 진행판'
-    document.getElementById('tabs').innerHTML = ''
+    document.getElementById('tabs').innerHTML = ''; document.getElementById('tabs').dataset.html = ''
     document.getElementById('ind').style.width = '0'
     document.getElementById('main').innerHTML = '<p class="muted">' + esc(m.empty || '세션 기록을 읽는 중이에요. 큰 세션은 몇 초 걸려요.') + '</p>'
     return
